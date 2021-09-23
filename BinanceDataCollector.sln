@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31710.8
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BinanceDataCollector", "BinanceDataCollector\BinanceDataCollector.csproj", "{6F50512A-955C-4138-845A-695E5D906D78}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UploadToDataBase", "UploadToDataBase\UploadToDataBase.csproj", "{7892ED4A-089D-47F7-A04B-F6E72207452F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6F50512A-955C-4138-845A-695E5D906D78}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F50512A-955C-4138-845A-695E5D906D78}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F50512A-955C-4138-845A-695E5D906D78}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F50512A-955C-4138-845A-695E5D906D78}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {BA35F37C-8582-44CF-BCD3-33C9D2908A13}
+	EndGlobalSection
+EndGlobal
