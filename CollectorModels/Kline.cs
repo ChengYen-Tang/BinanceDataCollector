@@ -1,6 +1,7 @@
-﻿using Magicodes.ExporterAndImporter.Core;
+﻿using System;
+using Magicodes.ExporterAndImporter.Core;
 
-namespace UploadToDataBase.Models
+namespace CollectorModels
 {
     public class QlibKline
     {

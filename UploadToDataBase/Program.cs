@@ -1,23 +1,26 @@
-﻿using EFCore.BulkExtensions;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using CollectorModels;
+using EFCore.BulkExtensions;
 using Magicodes.ExporterAndImporter.Core;
 using Magicodes.ExporterAndImporter.Csv;
-using UploadToDataBase.Models;
+using MoreLinq.Extensions;
 
 namespace UploadToDataBase
 {
     class Program
     {
-        const string source = @"C:\Users\kenneth\臺北科技大學 軟體工程實驗室\量化交易 - General\原始資料集";
+        const string source = @"/Users/kenneth/OneDrive - 臺北科技大學 軟體工程實驗室/量化交易/General/原始資料集";
 
-        static async Task Main(string[] args)
+        static void Main(string[] args)
         {
-            foreach(string path in Directory.GetFiles(source))
+            object lockObject = new();
+
+            Parallel.ForEach(Directory.GetFiles(source, "*.csv"), new ParallelOptions { MaxDegreeOfParallelism = 6 }, (path) =>
             {
-                QlibKline[] qlibKlines = await LoadCSVAsync(path);
-                Console.WriteLine($"{qlibKlines[0].StockCode}-Load data");
-                using BinanceDbContext db = new();
-                db.ChangeTracker.AutoDetectChangesEnabled = false;
-                db.ChangeTracker.LazyLoadingEnabled = false;
+                QlibKline[] qlibKlines = LoadCSVAsync(path).Result;
                 CoinModel coin = new() { Name = qlibKlines[0].StockCode };
                 CoinDataModel[] coinDatas = qlibKlines.Select(item => new CoinDataModel()
                 {
@@ -34,13 +37,19 @@ namespace UploadToDataBase
                     TradeCount = item.TradeCount,
                     Volume = item.Volume
                 }).ToArray();
+                Console.WriteLine($"{qlibKlines[0].StockCode}-Load data");
 
+                using BinanceDbContext db = new();
+                db.ChangeTracker.AutoDetectChangesEnabled = false;
+                db.ChangeTracker.LazyLoadingEnabled = false;
                 db.Coins.Add(coin);
-                await db.SaveChangesAsync();
+                db.SaveChanges();
                 Console.WriteLine($"{qlibKlines[0].StockCode}-Add coin");
-                await db.BulkInsertOrUpdateAsync(coinDatas, new BulkConfig() { BatchSize = 1000 });
+                db.BulkInsert(coinDatas);
                 Console.WriteLine($"{qlibKlines[0].StockCode}-Add coin data");
-            }
+            });
+
+            Console.ReadKey();
         }
 
         static async Task<QlibKline[]> LoadCSVAsync(string path)
@@ -48,7 +57,10 @@ namespace UploadToDataBase
             IImporter importer = new CsvImporter();
             var result = await importer.Import<QlibKline>(path);
             if (result.HasError)
+            {
+                Console.WriteLine($"{path} has error");
                 throw result.Exception;
+            }
 
             return result.Data.DistinctBy(item => item.Date).OrderBy(item => item.Date).ToArray();
         }

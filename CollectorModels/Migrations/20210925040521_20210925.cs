@@ -1,9 +1,9 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
-namespace UploadToDataBase.Migrations
+namespace CollectorModels.Migrations
 {
-    public partial class CreateTables : Migration
+    public partial class _20210925 : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {

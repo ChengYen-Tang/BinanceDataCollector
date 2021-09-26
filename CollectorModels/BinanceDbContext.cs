@@ -1,13 +1,15 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
-namespace UploadToDataBase.Models
+namespace CollectorModels
 {
-    internal class BinanceDbContext : DbContext
+    public class BinanceDbContext : DbContext
     {
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            optionsBuilder.UseSqlServer("Data Source=172.30.1.253,1433;Initial Catalog=CryptocurrencyDataset;User ID=sa;Password=P@ssw0rd;", opts => opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds));
+            optionsBuilder.UseSqlServer("Data Source=localhost,1433;Initial Catalog=CryptocurrencyDataset;User ID=sa;Password=P@ssw0rd;", opts => opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds));
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
