@@ -23,7 +23,7 @@ namespace BinanceDataCollector
                 IList<CoinDataModel> klines = await GetKlinesAsync(Id, Symbol, Market);
                 using BinanceDbContext db = new();
                 await db.BulkInsertOrUpdateAsync(klines);
-                Console.WriteLine($"{Market}-{Symbol} is done. [0]");
+                Console.WriteLine($"{Market}-{Symbol} is done. [{i}]");
                 i++;
             }
         }
