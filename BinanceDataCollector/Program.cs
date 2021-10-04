@@ -8,6 +8,7 @@ using Binance.Net.Interfaces.SubClients;
 using CollectorModels;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
+using MoreLinq;
 
 namespace BinanceDataCollector
 {
@@ -17,12 +18,12 @@ namespace BinanceDataCollector
         {
             ICollection<(Guid Id, string Symbol, string Market)> symbols = await GetSymbols();
             int i = 0;
-            foreach(var item in symbols)
+            foreach(var (Id, Symbol, Market) in symbols)
             {
-                IList<CoinDataModel> klines = await GetKlinesAsync(item.Id, item.Symbol, item.Market);
+                IList<CoinDataModel> klines = await GetKlinesAsync(Id, Symbol, Market);
                 using BinanceDbContext db = new();
                 await db.BulkInsertOrUpdateAsync(klines);
-                Console.WriteLine($"{item.Market}-{item.Symbol} is done. [0]");
+                Console.WriteLine($"{Market}-{Symbol} is done. [0]");
                 i++;
             }
         }
@@ -75,6 +76,8 @@ namespace BinanceDataCollector
                 startTime = endTime;
             }
 
+            kLines = kLines.DistinctBy(item => item.Date).OrderBy(item => item.Date).ToList();
+            kLines.RemoveAt(kLines.Count - 1);
             return kLines;
         }
 
