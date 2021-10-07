@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace CollectorModels.Migrations
 {
-    public partial class _20210925 : Migration
+    public partial class _20211008 : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -25,15 +25,15 @@ namespace CollectorModels.Migrations
                 {
                     Key = table.Column<string>(type: "nvarchar(450)", nullable: false),
                     Date = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Open = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                    High = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                    Low = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                    Close = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                    Volume = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                    Money = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
+                    Open = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
+                    High = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
+                    Low = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
+                    Close = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
+                    Volume = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
+                    Money = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
                     TradeCount = table.Column<int>(type: "int", nullable: false),
-                    TakerBuyBaseVolume = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                    TakerBuyQuoteVolume = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
+                    TakerBuyBaseVolume = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
+                    TakerBuyQuoteVolume = table.Column<decimal>(type: "decimal(38,19)", nullable: false),
                     CoinId = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
                 },
                 constraints: table =>

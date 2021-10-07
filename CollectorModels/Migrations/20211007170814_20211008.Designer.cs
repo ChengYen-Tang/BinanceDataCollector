@@ -10,8 +10,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CollectorModels.Migrations
 {
     [DbContext(typeof(BinanceDbContext))]
-    [Migration("20210925040521_20210925")]
-    partial class _20210925
+    [Migration("20211007170814_20211008")]
+    partial class _20211008
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
@@ -27,7 +27,7 @@ namespace CollectorModels.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<decimal>("Close")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<Guid>("CoinId")
                         .HasColumnType("uniqueidentifier");
@@ -36,28 +36,28 @@ namespace CollectorModels.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<decimal>("High")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("Low")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("Money")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("Open")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("TakerBuyBaseVolume")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("TakerBuyQuoteVolume")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<int>("TradeCount")
                         .HasColumnType("int");
 
                     b.Property<decimal>("Volume")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.HasKey("Key");
 

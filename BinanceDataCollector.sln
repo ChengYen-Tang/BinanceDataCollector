@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UploadToDataBase", "UploadT
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CollectorModels", "CollectorModels\CollectorModels.csproj", "{2AC3747D-DC1E-43A2-AC15-B815A33EC088}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DownloadFromDataBase", "DownloadFromDataBase\DownloadFromDataBase.csproj", "{9E1E5397-A040-4354-B8BB-7E7D5089D81D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,10 @@ Global
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

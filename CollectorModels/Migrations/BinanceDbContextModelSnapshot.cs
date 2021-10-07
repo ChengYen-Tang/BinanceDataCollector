@@ -25,7 +25,7 @@ namespace CollectorModels.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<decimal>("Close")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<Guid>("CoinId")
                         .HasColumnType("uniqueidentifier");
@@ -34,28 +34,28 @@ namespace CollectorModels.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<decimal>("High")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("Low")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("Money")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("Open")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("TakerBuyBaseVolume")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<decimal>("TakerBuyQuoteVolume")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.Property<int>("TradeCount")
                         .HasColumnType("int");
 
                     b.Property<decimal>("Volume")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(38,19)");
 
                     b.HasKey("Key");
 

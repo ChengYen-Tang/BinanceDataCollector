@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CollectorModels
 {
@@ -38,6 +39,7 @@ namespace CollectorModels
         public ICollection<CoinDataModel> CoinData {  get; set; }
     }
 
+    [Index(nameof(CoinId))]
     public class CoinDataModel
     {
         [Key]
@@ -46,21 +48,29 @@ namespace CollectorModels
         [Required]
         public DateTime Date { get; set; }
         [Required]
+        [Column(TypeName = "decimal(38, 19)")]
         public decimal Open { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal High { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal Low { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal Close { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal Volume { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal Money { get; set; }
         [Required]
         public int TradeCount { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal TakerBuyBaseVolume { get; set; }
+        [Column(TypeName = "decimal(38, 19)")]
         [Required]
         public decimal TakerBuyQuoteVolume { get; set; }
 
