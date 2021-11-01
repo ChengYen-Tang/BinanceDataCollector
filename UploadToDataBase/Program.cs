@@ -25,7 +25,7 @@ namespace UploadToDataBase
                 CoinDataModel[] coinDatas = qlibKlines.Select(item => new CoinDataModel()
                 {
                     CoinId = coin.Id,
-                    Key = $"{coin.Id}-{item.Date}",
+                    Key = $"{coin.Id}-{item.Date:s}",
                     Date = item.Date,
                     Close = item.Close,
                     High = item.High,

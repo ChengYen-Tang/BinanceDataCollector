@@ -18,7 +18,7 @@ namespace BinanceDataCollector
         {
             ICollection<(Guid Id, string Symbol, string Market)> symbols = await GetSymbols();
             int i = 0;
-            foreach(var (Id, Symbol, Market) in symbols)
+            foreach (var (Id, Symbol, Market) in symbols)
             {
                 IList<CoinDataModel> klines = await GetKlinesAsync(Id, Symbol, Market);
                 using BinanceDbContext db = new();
@@ -60,7 +60,7 @@ namespace BinanceDataCollector
                                 TakerBuyQuoteVolume = item.TakerBuyQuoteVolume,
                                 TradeCount = item.TradeCount,
                                 CoinId = id,
-                                Key = $"{id}-{item.OpenTime}"
+                                Key = $"{id}-{item.OpenTime:s}"
                             }));
                     }
                 }

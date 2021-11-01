@@ -46,6 +46,7 @@ namespace CollectorModels
         [Required]
         public string Key {  get; set; }
         [Required]
+        [Column(TypeName = "datetime")]
         public DateTime Date { get; set; }
         [Required]
         [Column(TypeName = "decimal(38, 19)")]

@@ -14,7 +14,7 @@
     <None Remove="morelinq" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Binance.Net" Version="7.2.4" />
+    <PackageReference Include="Binance.Net" Version="7.2.5" />
     <PackageReference Include="morelinq" Version="3.3.2" />
   </ItemGroup>
 </Project>

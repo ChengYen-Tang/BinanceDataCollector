@@ -21,9 +21,9 @@ namespace DownloadFromDataBase
                 using BinanceDbContext db = new();
                 CoinDataModel[] data = await db.CoinData.Where(item => item.CoinId == coin.Id).OrderBy(item => item.Date).ToArrayAsync();
                 ICollection<QlibKline> kline = CoinModelToQlibKlines(data, coin.Name);
-                await ExportAsync("/Users/kenneth/OneDrive - 臺北科技大學 軟體工程實驗室/量化交易/General/原始資料集-測試", $"{coin.Name}.csv", kline);
+                await ExportAsync("/Users/kenneth/OneDrive - 臺北科技大學 軟體工程實驗室/量化交易/General/原始資料集", $"{coin.Name}.csv", kline);
                 i++;
-                Console.WriteLine($"{coin.Name}.csv [{i}]");
+                Console.WriteLine($"{coin.Name}.csv [{i}/{coins.Length}]");
             }
         }
 
@@ -43,17 +43,17 @@ namespace DownloadFromDataBase
             {
                 StockCode = stockCode,
                 Date = data.Date,
-                Open = data.Open,
-                Close = data.Close,
-                High = data.High,
-                Low = data.Low,
-                Volume = data.Volume,
-                Money = data.Money,
+                Open = data.Open.Normalize(),
+                Close = data.Close.Normalize(),
+                High = data.High.Normalize(),
+                Low = data.Low.Normalize(),
+                Volume = data.Volume.Normalize(),
+                Money = data.Money.Normalize(),
                 Factor = 1,
                 TradeCount = data.TradeCount,
-                TakerBuyBaseVolume = data.TakerBuyBaseVolume,
-                TakerBuyQuoteVolume = data.TakerBuyQuoteVolume,
-                //Change = isFirst ? 0 : (data.Close - LastClose) / LastClose
+                TakerBuyBaseVolume = data.TakerBuyBaseVolume.Normalize(),
+                TakerBuyQuoteVolume = data.TakerBuyQuoteVolume.Normalize(),
+                Change = isFirst ? 0 : ((data.Close - LastClose) / LastClose).Normalize()
             };
 
         static async Task ExportAsync(string path, string fileName, ICollection<QlibKline> data)
@@ -69,6 +69,11 @@ namespace DownloadFromDataBase
         {
             using BinanceDbContext db = new();
             return await db.Coins.ToArrayAsync();
+        }
+
+        public static decimal Normalize(this decimal value)
+        {
+            return value / 1.000000000000000000000000000000000m;
         }
     }
 }
