@@ -3,13 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31710.8
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BinanceDataCollector", "BinanceDataCollector\BinanceDataCollector.csproj", "{6F50512A-955C-4138-845A-695E5D906D78}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CollectorModels", "CollectorModels\CollectorModels.csproj", "{2AC3747D-DC1E-43A2-AC15-B815A33EC088}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UploadToDataBase", "UploadToDataBase\UploadToDataBase.csproj", "{7892ED4A-089D-47F7-A04B-F6E72207452F}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CollectorModels", "CollectorModels\CollectorModels.csproj", "{2AC3747D-DC1E-43A2-AC15-B815A33EC088}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DownloadFromDataBase", "DownloadFromDataBase\DownloadFromDataBase.csproj", "{9E1E5397-A040-4354-B8BB-7E7D5089D81D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BinanceDataCollector", "BinanceDataCollector\BinanceDataCollector.csproj", "{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -17,22 +13,14 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{6F50512A-955C-4138-845A-695E5D906D78}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6F50512A-955C-4138-845A-695E5D906D78}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6F50512A-955C-4138-845A-695E5D906D78}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6F50512A-955C-4138-845A-695E5D906D78}.Release|Any CPU.Build.0 = Release|Any CPU
-		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{7892ED4A-089D-47F7-A04B-F6E72207452F}.Release|Any CPU.Build.0 = Release|Any CPU
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2AC3747D-DC1E-43A2-AC15-B815A33EC088}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9E1E5397-A040-4354-B8BB-7E7D5089D81D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
