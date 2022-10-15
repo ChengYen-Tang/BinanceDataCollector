@@ -5,6 +5,7 @@ using CollectorModels.Models;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using ShardingCore.Extensions;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -22,7 +23,9 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         SpotBinanceKline[] klines = await db.SpotBinanceKlines.Where(item => item.OpenTime < yearsReserved).ToArrayAsync(ct);
         using IDbContextTransaction transaction = db.Database.BeginTransaction();
-        await db.BulkDeleteAsync(klines, bulkConfig, cancellationToken: ct);
+        Dictionary<DbContext, IEnumerable<SpotBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
+        foreach (KeyValuePair<DbContext, IEnumerable<SpotBinanceKline>> item in bulkShardingEnumerable)
+            await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
         transaction.Commit();
     }
 
@@ -31,6 +34,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        var a = (await db.SpotBinanceKlines.AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct));
         return (await db.SpotBinanceKlines.AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
             ? await db.SpotBinanceKlines.Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;

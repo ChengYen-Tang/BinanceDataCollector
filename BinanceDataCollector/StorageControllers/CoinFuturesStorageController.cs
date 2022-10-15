@@ -5,6 +5,7 @@ using CollectorModels.Models;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using ShardingCore.Extensions;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -22,7 +23,9 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         FuturesCoinBinanceKline[] klines = await db.FuturesCoinBinanceKlines.Where(item => item.OpenTime < yearsReserved).ToArrayAsync(ct);
         using IDbContextTransaction transaction = db.Database.BeginTransaction();
-        await db.BulkDeleteAsync(klines, bulkConfig, cancellationToken: ct);
+        Dictionary<DbContext, IEnumerable<FuturesCoinBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
+        foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinanceKline>> item in bulkShardingEnumerable)
+            await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
         transaction.Commit();
     }
 

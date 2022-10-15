@@ -2,7 +2,9 @@
 using CollectorModels;
 using CollectorModels.Models;
 using EFCore.BulkExtensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using ShardingCore.Extensions;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -52,7 +54,7 @@ internal abstract class StorageController<T, T1>
         return new(InsertKlinesAsync, result.Value, ct);
     }
 
-    private async Task InsertKlinesAsync(IList<T1> klines, CancellationToken ct = default)
+    protected async Task InsertKlinesAsync(IList<T1> klines, CancellationToken ct = default)
     {
         if (!klines.Any())
             return;
@@ -62,7 +64,9 @@ internal abstract class StorageController<T, T1>
         try
         {
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
-            await db.BulkInsertAsync(klines, bulkConfig, cancellationToken: ct);
+            Dictionary<DbContext, IEnumerable<T1>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
+            foreach (KeyValuePair<DbContext, IEnumerable<T1>> item in bulkShardingEnumerable)
+                await item.Key.BulkInsertAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             transaction.Commit();
         }
         catch (Exception ex)
