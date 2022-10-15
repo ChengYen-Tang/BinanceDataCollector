@@ -62,7 +62,7 @@ internal abstract class StorageController<T, T1>
         try
         {
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
-            await db.BulkInsertOrUpdateOrDeleteAsync(klines, bulkConfig, cancellationToken: ct);
+            await db.BulkInsertAsync(klines, bulkConfig, cancellationToken: ct);
             transaction.Commit();
         }
         catch (Exception ex)

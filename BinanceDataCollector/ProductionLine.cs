@@ -35,12 +35,21 @@ internal class ProductionLine
         for (int i = 0; i < getLastTimeWorkerCount; i++)
             tasks.Add(Task.Factory.StartNew(GetLastTimeProcessAsync, TaskCreationOptions.LongRunning));
         tasks.Add(Task.Factory.StartNew(GatherKlineProcessAsync, TaskCreationOptions.LongRunning));
-        for (int i = 0; i < insertKlineWorkerCount; i++)
-            tasks.Add(Task.Factory.StartNew(() => InsertKlineProcessAsync(i), TaskCreationOptions.LongRunning));
         lastProcessState = new ProcessState[insertKlineWorkerCount];
-        for (int i = 0; i < deleteKlineWorkerCount; i++)
-            tasks.Add(Task.Factory.StartNew(() => DeleteKlineProcessAsync(i), TaskCreationOptions.LongRunning));
+        for (int i = 0; i < insertKlineWorkerCount; i++)
+        {
+            int index = i;
+            tasks.Add(Task.Factory.StartNew(() => InsertKlineProcessAsync(index), TaskCreationOptions.LongRunning));
+            lastProcessState[i] = new();
+        }
         deleteProcessState = new ProcessState[deleteKlineWorkerCount];
+        for (int i = 0; i < deleteKlineWorkerCount; i++)
+        {
+            int index = i;
+            tasks.Add(Task.Factory.StartNew(() => DeleteKlineProcessAsync(index), TaskCreationOptions.LongRunning));
+            deleteProcessState[i] = new();
+        }
+
         isRunning = true;
     }
     
@@ -107,7 +116,7 @@ internal class ProductionLine
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
 
-            if (lastProcessState.All(x => !x.State) && InsertKlineChannel.Reader.Count == 0 && GatherKlineChannel.Reader.Count == 0 && GetLastTimeChannel.Reader.Count == 0)
+            if (lastProcessState.All(x => { lock (x.Lock) return !x.State; }) && InsertKlineChannel.Reader.Count == 0 && GatherKlineChannel.Reader.Count == 0 && GetLastTimeChannel.Reader.Count == 0)
                 deleteWaitEvent.Set();
         }
         logger.LogInformation("InsertKlineProcessAsync stopped");
@@ -129,7 +138,7 @@ internal class ProductionLine
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
 
-            if (deleteProcessState.All(x => !x.State) && DeleteKlineChannel.Reader.Count == 0)
+            if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteKlineChannel.Reader.Count == 0)
                 productionLineWaitEvent.Set();
         }
         logger.LogInformation("DeleteKlineProcessAsync stopped");

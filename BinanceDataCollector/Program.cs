@@ -15,9 +15,6 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddScoped<ICollectorController, SpotCollectorController>();
         services.AddScoped<ICollectorController, CoinFuturesCollectorController>();
         services.AddScoped<ICollectorController, UsdFuturesCollectorController>();
-        //services.AddScoped<SpotCollectorController>();
-        //services.AddScoped<CoinFuturesCollectorController>();
-        //services.AddScoped<UsdFuturesCollectorController>();
         services.AddScoped<SpotStorageController>();
         services.AddScoped<CoinFuturesStorageController>();
         services.AddScoped<UsdFuturesStorageController>();
@@ -32,6 +29,7 @@ IHost host = Host.CreateDefaultBuilder(args)
                     op.AddShardingTableRoute<FuturesCoinBinanceKlineVirtualTableRoute>();
                 }).UseConfig(op =>
                 {
+                    op.ThrowIfQueryRouteNotMatch = false;
                     op.UseShardingQuery((connStr, builder) =>
                     {
                         //connStr is delegate input param
