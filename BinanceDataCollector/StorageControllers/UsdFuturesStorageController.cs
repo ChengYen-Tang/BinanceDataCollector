@@ -2,10 +2,10 @@
 using BinanceDataCollector.Collectors.BinanceApi;
 using CollectorModels;
 using CollectorModels.Models;
+using CollectorModels.ShardingCore;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using ShardingCore.Extensions;
 
 namespace BinanceDataCollector.StorageControllers;
 

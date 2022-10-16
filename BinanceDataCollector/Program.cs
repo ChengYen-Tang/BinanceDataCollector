@@ -2,6 +2,7 @@ using BinanceDataCollector;
 using BinanceDataCollector.Collectors.CollectorControllers;
 using BinanceDataCollector.StorageControllers;
 using CollectorModels;
+using CollectorModels.ShardingCore;
 using Microsoft.EntityFrameworkCore;
 using ShardingCore;
 

@@ -12,7 +12,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 
-namespace CollectorModels;
+namespace CollectorModels.ShardingCore;
 
 public class BinanceKlineVirtualTableRoute<T> : AbstractShardingOperatorVirtualTableRoute<T, string>
     where T : BinanceKline
