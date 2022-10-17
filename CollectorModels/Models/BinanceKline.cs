@@ -85,6 +85,18 @@ public class SpotBinanceKline : BinanceKline
 [Index(nameof(Interval))]
 [Index(nameof(CloseTime), nameof(Interval))]
 [Index(nameof(OpenTime), nameof(Interval))]
+[Index(nameof(OpenTime), nameof(Interval), nameof(OpenPrice))]
+[Index(nameof(OpenTime), nameof(Interval), nameof(ClosePrice))]
+[Index(nameof(OpenTime), nameof(Interval), nameof(Volume))]
+[Index(nameof(OpenTime), nameof(Interval), nameof(QuoteVolume))]
+[Index(nameof(OpenTime), nameof(Interval), nameof(HighPrice))]
+[Index(nameof(OpenTime), nameof(Interval), nameof(LowPrice))]
+[Index(nameof(CloseTime), nameof(Interval), nameof(OpenPrice))]
+[Index(nameof(CloseTime), nameof(Interval), nameof(ClosePrice))]
+[Index(nameof(CloseTime), nameof(Interval), nameof(Volume))]
+[Index(nameof(CloseTime), nameof(Interval), nameof(QuoteVolume))]
+[Index(nameof(CloseTime), nameof(Interval), nameof(HighPrice))]
+[Index(nameof(CloseTime), nameof(Interval), nameof(LowPrice))]
 public class FuturesUsdtBinanceKline : BinanceKline
 {
     public BinanceFuturesUsdtSymbolInfo SymbolInfo { get; set; }

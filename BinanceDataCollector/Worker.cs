@@ -1,6 +1,5 @@
 using BinanceDataCollector.Collectors.CollectorControllers;
 using Hangfire;
-using ShardingCore;
 
 namespace BinanceDataCollector;
 
@@ -15,8 +14,6 @@ internal class Worker : IHostedService
 
     public Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, HangfireJob hangfireJob, ProductionLine productionLine)
     {
-        serviceProvider.UseAutoShardingCreate();
-        serviceProvider.UseAutoTryCompensateTable();
         this.logger = logger;
         this.serviceProvider = serviceProvider;
         this.hangfireJob = hangfireJob;

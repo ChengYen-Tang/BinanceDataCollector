@@ -7,6 +7,16 @@ using Microsoft.EntityFrameworkCore;
 using ShardingCore;
 
 IHost host = Host.CreateDefaultBuilder(args)
+    .ConfigureLogging(logging =>
+    {
+#if DEBUG
+        logging.SetMinimumLevel(LogLevel.Debug);
+        logging.AddFile("Logs/{Date}.txt", LogLevel.Debug);
+#else
+        logging.SetMinimumLevel(LogLevel.Information);
+        logging.AddFile("Logs/{Date}.txt", LogLevel.Information);
+#endif
+    })
     .ConfigureServices((hostContext, services) =>
     {
         services.AddSingleton<HangfireJob>();
