@@ -9,10 +9,10 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace CollectorModels.Migrations.ShardingMigrations
+namespace CollectorModels.Migrations
 {
     [DbContext(typeof(BinanceDbContext))]
-    [Migration("20221017160808_EFCoreSharding")]
+    [Migration("20221018160835_EFCoreSharding")]
     partial class EFCoreSharding
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

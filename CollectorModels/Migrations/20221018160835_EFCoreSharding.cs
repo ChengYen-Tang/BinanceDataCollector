@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace CollectorModels.Migrations.ShardingMigrations
+namespace CollectorModels.Migrations
 {
     public partial class EFCoreSharding : Migration
     {

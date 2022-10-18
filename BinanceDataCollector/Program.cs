@@ -4,6 +4,7 @@ using BinanceDataCollector.StorageControllers;
 using CollectorModels;
 using CollectorModels.ShardingCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using ShardingCore;
 
 IHost host = Host.CreateDefaultBuilder(args)
@@ -54,6 +55,9 @@ IHost host = Host.CreateDefaultBuilder(args)
                     //use your data base connection string
                     op.AddDefaultDataSource(Guid.NewGuid().ToString("n"),
                         hostContext.Configuration["ConnectionStrings:DefaultConnection"]);
+                    op.UseShardingMigrationConfigure(b => {
+                        b.ReplaceService<IMigrationsSqlGenerator, ShardingSqlServerMigrationsSqlGenerator>();
+                    });
                 }).AddShardingCore();
     })
     .Build();
