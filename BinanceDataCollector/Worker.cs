@@ -1,5 +1,7 @@
 using BinanceDataCollector.Collectors.CollectorControllers;
+using CollectorModels;
 using Hangfire;
+using Microsoft.EntityFrameworkCore;
 using ShardingCore;
 
 namespace BinanceDataCollector;
@@ -15,7 +17,7 @@ internal class Worker : IHostedService
 
     public Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, HangfireJob hangfireJob, ProductionLine productionLine)
     {
-        //serviceProvider.UseAutoShardingCreate();
+        serviceProvider.UseAutoShardingCreate();
         this.logger = logger;
         this.serviceProvider = serviceProvider;
         this.hangfireJob = hangfireJob;
@@ -26,6 +28,11 @@ internal class Worker : IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         productionLine.Start();
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider scopeServiceProvider = scope.ServiceProvider;
+        using BinanceDbContext db = scopeServiceProvider.GetRequiredService<BinanceDbContext>();
+        if (db.Database.GetPendingMigrations().Any())
+            db.Database.Migrate();
         GlobalConfiguration.Configuration
                 .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
                 .UseColouredConsoleLogProvider()
