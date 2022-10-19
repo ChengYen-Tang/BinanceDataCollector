@@ -4,18 +4,16 @@ using CollectorModels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace CollectorModels.Migrations
+namespace BinanceDataCollector.Migrations
 {
     [DbContext(typeof(BinanceDbContext))]
-    [Migration("20221018160835_EFCoreSharding")]
-    partial class EFCoreSharding
+    partial class BinanceDbContextModelSnapshot : ModelSnapshot
     {
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

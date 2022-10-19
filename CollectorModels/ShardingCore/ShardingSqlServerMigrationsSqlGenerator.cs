@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using ShardingCore.Core.RuntimeContexts;
 using ShardingCore.Helpers;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 
 namespace CollectorModels.ShardingCore;
@@ -11,7 +12,7 @@ public class ShardingSqlServerMigrationsSqlGenerator : SqlServerMigrationsSqlGen
 {
     private readonly IShardingRuntimeContext shardingRuntimeContext;
 
-    public ShardingSqlServerMigrationsSqlGenerator(MigrationsSqlGeneratorDependencies dependencies, IRelationalAnnotationProvider migrationsAnnotations, IShardingRuntimeContext shardingRuntimeContext)
+    public ShardingSqlServerMigrationsSqlGenerator(IShardingRuntimeContext shardingRuntimeContext, [NotNull] MigrationsSqlGeneratorDependencies dependencies, [NotNull] IRelationalAnnotationProvider migrationsAnnotations)
         : base(dependencies, migrationsAnnotations) => this.shardingRuntimeContext = shardingRuntimeContext;
 
     protected override void Generate(

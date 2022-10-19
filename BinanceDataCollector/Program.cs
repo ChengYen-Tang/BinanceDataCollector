@@ -45,12 +45,12 @@ IHost host = Host.CreateDefaultBuilder(args)
                     op.UseShardingQuery((connStr, builder) =>
                     {
                         //connStr is delegate input param
-                        builder.UseSqlServer(connStr);
+                        builder.UseSqlServer(connStr, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
                     });
                     op.UseShardingTransaction((connection, builder) =>
                     {
                         //connection is delegate input param
-                        builder.UseSqlServer(connection, opts => opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds));
+                        builder.UseSqlServer(connection, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
                     });
                     //use your data base connection string
                     op.AddDefaultDataSource(Guid.NewGuid().ToString("n"),
