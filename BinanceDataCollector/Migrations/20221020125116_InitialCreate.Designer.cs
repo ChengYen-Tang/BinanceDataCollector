@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BinanceDataCollector.Migrations
 {
     [DbContext(typeof(BinanceDbContext))]
-    [Migration("20221019162555_InitialCreate")]
+    [Migration("20221020125116_InitialCreate")]
     partial class InitialCreate
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
