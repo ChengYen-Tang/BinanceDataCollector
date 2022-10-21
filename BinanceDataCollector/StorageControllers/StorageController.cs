@@ -31,9 +31,11 @@ internal abstract class StorageController<T, T1>
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
+            logger.LogDebug($"Start updating {typeof(T).Name} Count: {result.Value.Count}...");
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             await db.BulkInsertOrUpdateOrDeleteAsync(result.Value, bulkConfig, cancellationToken: ct);
             transaction.Commit();
+            logger.LogDebug($"Finish updating.");
         }
         catch (Exception ex)
         {
@@ -44,7 +46,9 @@ internal abstract class StorageController<T, T1>
 
     public async Task<AsyncWorkItem<IList<T1>>> UpdateKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
+        logger.LogDebug($"Start getting {typeof(T1).Name} {symbol} {interval} {startTime}...");
         Result<List<T1>> result = await GetKlinesAsync(symbol, interval, startTime, ct);
+        logger.LogDebug($"Finish getting.");
         if (result.IsFailed)
         {
             logger.LogError(result.Errors[0].Message);
@@ -64,11 +68,13 @@ internal abstract class StorageController<T, T1>
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
+            logger.LogDebug($"Start inserting {typeof(T1).Name} Count: {klines.Count}...");
             Dictionary<DbContext, IEnumerable<T1>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<T1>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             transaction.Commit();
+            logger.LogDebug($"Finish inserting.");
         }
         catch (Exception ex)
         {

@@ -10,12 +10,14 @@ using ShardingCore;
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureLogging(logging =>
     {
+        string outputTemplate = "{Timestamp:o} {RequestId,13} [{Level:u3}] [{SourceContext} {Method}] {Message} ({EventId:x8}){NewLine}{Exception}";
+        logging.AddFilter("Microsoft.*", LogLevel.Warning);
 #if DEBUG
         logging.SetMinimumLevel(LogLevel.Debug);
-        logging.AddFile("Logs/{Date}.txt", LogLevel.Debug);
+        logging.AddFile("Logs/{Date}.txt", LogLevel.Debug, outputTemplate: outputTemplate);
 #else
         logging.SetMinimumLevel(LogLevel.Information);
-        logging.AddFile("Logs/{Date}.txt", LogLevel.Information);
+        logging.AddFile("Logs/{Date}.txt", LogLevel.Information, outputTemplate: outputTemplate);
 #endif
     })
     .ConfigureServices((hostContext, services) =>

@@ -16,6 +16,8 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                 WebCallResult<IEnumerable<IBinanceKline>> result = await client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1000, ct);
                 if (!result.Success)
                     return Result.Fail(result.Error!.Message);
+                if (!result.Data!.Any())
+                    break;
                 startTime = result.Data.Last().CloseTime;
                 klines.AddRange(result.Data);
                 await Task.Delay(500, ct);
