@@ -4,8 +4,9 @@ namespace BinanceDataCollector.Collectors.BinanceApi
 {
     internal class Spot : BaseTrade<BinanceSymbol>
     {
-        public Spot(BinanceClient client)
-            : base(client) { }
+        private readonly string[] ignoneCoins;
+        public Spot(BinanceClient client, string[] ignoneCoins)
+            : base(client) => this.ignoneCoins = ignoneCoins;
 
         public override async Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         {
@@ -13,7 +14,15 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             List<IBinanceKline> klines = new();
             while (startTime < endTime)
             {
-                WebCallResult<IEnumerable<IBinanceKline>> result = await client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1000, ct);
+                WebCallResult<IEnumerable<IBinanceKline>> result;
+                try
+                {
+                    result = await client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1000, ct);
+                }
+                catch (Exception ex)
+                {
+                    return Result.Fail(ex.Message);
+                }
                 if (!result.Success)
                     return Result.Fail(result.Error!.Message);
                 if (!result.Data!.Any())
@@ -30,7 +39,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             WebCallResult<BinanceExchangeInfo> result = await client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct);
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            return Result.Ok(result.Data.Symbols);
+            return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Contains(x.Name)));
         }
     }
 }

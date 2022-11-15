@@ -13,8 +13,8 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 {
     private readonly Spot spot;
     
-    public SpotStorageController(IServiceProvider serviceProvider, ILogger<SpotStorageController> logger, BinanceClient client)
-        : base(serviceProvider, logger) => (spot) = (new(client));
+    public SpotStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<SpotStorageController> logger, BinanceClient client)
+        : base(serviceProvider, logger) => (spot) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? Array.Empty<string>()));
 
     public override async Task DeleteOldKlines(CancellationToken ct = default)
     {

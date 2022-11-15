@@ -82,4 +82,7 @@ public class BinanceSymbolInfo
     public IEnumerable<AccountType> Permissions { get; set; }
 
     public List<SpotBinanceKline> BinanceKlines { get; set; }
+
+    public override string ToString()
+        => Name;
 }

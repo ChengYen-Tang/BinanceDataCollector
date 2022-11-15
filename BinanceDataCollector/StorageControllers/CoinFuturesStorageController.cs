@@ -13,8 +13,8 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
 {
     private readonly CoinFutures coinFutures;
 
-    public CoinFuturesStorageController(IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, BinanceClient client)
-        : base(serviceProvider, logger) => (coinFutures) = (new(client));
+    public CoinFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, BinanceClient client)
+        : base(serviceProvider, logger) => (coinFutures) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? Array.Empty<string>()));
 
     public override async Task DeleteOldKlines(CancellationToken ct = default)
     {

@@ -13,8 +13,8 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 {
     private readonly UsdFutures usdFutures;
 
-    public UsdFuturesStorageController(IServiceProvider serviceProvider, ILogger<UsdFuturesStorageController> logger, BinanceClient client)
-        : base(serviceProvider, logger) => (usdFutures) = (new(client));
+    public UsdFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<UsdFuturesStorageController> logger, BinanceClient client)
+        : base(serviceProvider, logger) => (usdFutures) = (new(client, configuration.GetSection("IgnoneCoins:UsdFutures").Get<string[]>() ?? Array.Empty<string>()));
 
     public override async Task DeleteOldKlines(CancellationToken ct = default)
     {
@@ -35,7 +35,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         return (await db.FuturesUsdtBinanceKlines.AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesCoinBinanceKlines.Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
+            ? await db.FuturesUsdtBinanceKlines.Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
     }
 

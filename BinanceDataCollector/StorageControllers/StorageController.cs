@@ -51,8 +51,9 @@ internal abstract class StorageController<T, T1>
         logger.LogDebug($"Finish getting.");
         if (result.IsFailed)
         {
-            logger.LogError(result.Errors[0].Message);
-            await Task.Delay(30 * 60 * 1000, ct);
+            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
             return new(InsertKlinesAsync, new List<T1>(), ct);
         }
 
@@ -72,7 +73,7 @@ internal abstract class StorageController<T, T1>
             Dictionary<DbContext, IEnumerable<T1>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<T1>> item in bulkShardingEnumerable)
-                await item.Key.BulkInsertAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+                await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             transaction.Commit();
             logger.LogDebug($"Finish inserting.");
         }

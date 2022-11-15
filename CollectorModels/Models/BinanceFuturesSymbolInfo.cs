@@ -100,4 +100,7 @@ public class BinanceFuturesSymbolInfo
     /// The status of the symbol
     /// </summary>
     public SymbolStatus Status { get; set; }
+
+    public override string ToString()
+        => Name;
 }
