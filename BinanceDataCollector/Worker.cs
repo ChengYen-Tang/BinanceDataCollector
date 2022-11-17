@@ -39,8 +39,8 @@ internal class Worker : IHostedService
                 .UseActivator(new HangfireActivator(serviceProvider))
                 .UseInMemoryStorage();
 
-        BackgroundJob.Enqueue(() => hangfireJob.RunJob(cts.Token));
-        //RecurringJob.AddOrUpdate(() => hangfireJob.RunJob(cts.Token), "30 0 * * *");
+        //BackgroundJob.Enqueue(() => hangfireJob.RunJob(cts.Token));
+        RecurringJob.AddOrUpdate(() => hangfireJob.RunJob(cts.Token), "30 0 * * *");
         backgroundJobServer = new BackgroundJobServer();
         
         logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);

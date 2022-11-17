@@ -21,12 +21,15 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        SpotBinanceKline[] klines = await db.SpotBinanceKlines.Where(item => item.OpenTime < yearsReserved).ToArrayAsync(ct);
-        using IDbContextTransaction transaction = db.Database.BeginTransaction();
-        Dictionary<DbContext, IEnumerable<SpotBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
-        foreach (KeyValuePair<DbContext, IEnumerable<SpotBinanceKline>> item in bulkShardingEnumerable)
-            await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-        transaction.Commit();
+        foreach (BinanceSymbolInfo symbol in await db.BinanceSymbolInfos.AsNoTracking().ToArrayAsync(ct))
+        {
+            SpotBinanceKline[] klines = await db.SpotBinanceKlines.AsNoTracking().Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbol.Name).ToArrayAsync(ct);
+            using IDbContextTransaction transaction = db.Database.BeginTransaction();
+            Dictionary<DbContext, IEnumerable<SpotBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
+            foreach (KeyValuePair<DbContext, IEnumerable<SpotBinanceKline>> item in bulkShardingEnumerable)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            transaction.Commit();
+        }
     }
 
     public override async Task<DateTime> GetLastTimeAsync(BinanceSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
@@ -34,9 +37,8 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        var a = (await db.SpotBinanceKlines.AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct));
-        return (await db.SpotBinanceKlines.AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.SpotBinanceKlines.Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
+        return (await db.SpotBinanceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
+            ? await db.SpotBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
     }
 

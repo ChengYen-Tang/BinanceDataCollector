@@ -21,12 +21,15 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        FuturesCoinBinanceKline[] klines = await db.FuturesCoinBinanceKlines.Where(item => item.OpenTime < yearsReserved).ToArrayAsync(ct);
-        using IDbContextTransaction transaction = db.Database.BeginTransaction();
-        Dictionary<DbContext, IEnumerable<FuturesCoinBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
-        foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinanceKline>> item in bulkShardingEnumerable)
-            await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-        transaction.Commit();
+        foreach (BinanceFuturesCoinSymbolInfo symbol in await db.BinanceFuturesCoinSymbolInfos.AsNoTracking().ToArrayAsync(ct))
+        {
+            FuturesCoinBinanceKline[] klines = await db.FuturesCoinBinanceKlines.AsNoTracking().Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbol.Name).ToArrayAsync(ct);
+            using IDbContextTransaction transaction = db.Database.BeginTransaction();
+            Dictionary<DbContext, IEnumerable<FuturesCoinBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinanceKline>> item in bulkShardingEnumerable)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            transaction.Commit();
+        }
     }
 
     public override async Task<DateTime> GetLastTimeAsync(BinanceFuturesCoinSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
@@ -34,8 +37,8 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesCoinBinanceKlines.AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesCoinBinanceKlines.Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
+        return (await db.FuturesCoinBinanceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesCoinBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
     }
 

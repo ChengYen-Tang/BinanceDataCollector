@@ -24,7 +24,7 @@ internal abstract class CollectorController<T, T1> : ICollectorController
             logger.LogError(result.Errors[0].Message);
             return;
         }
-        
+
         foreach (T symbol in result.Value)
         {
             AsyncWorkItem<T> workItem = new(GetLastTimeAsync, symbol, ct);
