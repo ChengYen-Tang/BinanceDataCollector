@@ -11,13 +11,13 @@ IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureLogging(logging =>
     {
         string outputTemplate = "{Timestamp:o} {RequestId,13} [{Level:u3}] [{SourceContext} {Method}] {Message} ({EventId:x8}){NewLine}{Exception}";
-        logging.AddFilter("Microsoft.*", LogLevel.Warning);
+        Dictionary<string, LogLevel> levelOverrides = new() { { "Default", LogLevel.Information }, { "Microsoft.Hosting.Lifetime", LogLevel.Information }, { "Microsoft.EntityFrameworkCore", LogLevel.Error } };
 #if DEBUG
         logging.SetMinimumLevel(LogLevel.Debug);
-        logging.AddFile("Logs/{Date}.txt", LogLevel.Debug, outputTemplate: outputTemplate);
+        logging.AddFile("Logs/{Date}.txt", LogLevel.Debug, levelOverrides, outputTemplate: outputTemplate);
 #else
         logging.SetMinimumLevel(LogLevel.Information);
-        logging.AddFile("Logs/{Date}.txt", LogLevel.Information, outputTemplate: outputTemplate);
+        logging.AddFile("Logs/{Date}.txt", LogLevel.Information, levelOverrides, outputTemplate: outputTemplate);
 #endif
     })
     .ConfigureServices((hostContext, services) =>
@@ -47,12 +47,12 @@ IHost host = Host.CreateDefaultBuilder(args)
                     op.UseShardingQuery((connStr, builder) =>
                     {
                         //connStr is delegate input param
-                        builder.UseSqlServer(connStr, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
+                        builder.UseSqlServer(connStr, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
                     });
                     op.UseShardingTransaction((connection, builder) =>
                     {
                         //connection is delegate input param
-                        builder.UseSqlServer(connection, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(30).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
+                        builder.UseSqlServer(connection, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
                     });
                     //use your data base connection string
                     op.AddDefaultDataSource(Guid.NewGuid().ToString("n"),

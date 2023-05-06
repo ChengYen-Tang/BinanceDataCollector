@@ -11,6 +11,7 @@ internal class ProductionLine
     private readonly ManualResetEvent deleteWaitEvent;
     private readonly ManualResetEvent productionLineWaitEvent;
     private bool isRunning;
+    private volatile int deleteWorkItemCount;
     private CancellationTokenSource cancellationTokenSource = null!;
     private ProcessState[] lastProcessState = null!;
     private ProcessState[] deleteProcessState = null!;
@@ -49,7 +50,7 @@ internal class ProductionLine
             tasks.Add(Task.Factory.StartNew(() => DeleteKlineProcessAsync(index), TaskCreationOptions.LongRunning));
             deleteProcessState[i] = new();
         }
-
+        ResetEvent();
         isRunning = true;
     }
     
@@ -66,6 +67,7 @@ internal class ProductionLine
     
     public void ResetEvent()
     {
+        deleteWorkItemCount = 0;
         deleteWaitEvent.Reset();
         productionLineWaitEvent.Reset();
     }
@@ -80,7 +82,14 @@ internal class ProductionLine
         {
             if (GetLastTimeChannel.Reader.TryRead(out IAsymcWorkItem? item))
             {
-                await item.Run();
+                try
+                {
+                    await item.Run();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "GetLastTimeProcessAsync error");
+                }    
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
         }
@@ -94,7 +103,14 @@ internal class ProductionLine
         {
             if (GatherKlineChannel.Reader.TryRead(out IAsymcWorkItem? item))
             {
-                await item.Run();
+                try
+                {
+                    await item.Run();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "GatherKlineProcessAsync error");
+                }
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
         }
@@ -110,7 +126,14 @@ internal class ProductionLine
             {
                 lock(lastProcessState[index].Lock)
                     lastProcessState[index].State = true;
-                await item.Run();
+                try
+                {
+                    await item.Run();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "InsertKlineProcessAsync error");
+                }
                 lock (lastProcessState[index].Lock)
                     lastProcessState[index].State = false;
 
@@ -133,13 +156,20 @@ internal class ProductionLine
             {
                 lock (deleteProcessState[index].Lock)
                     deleteProcessState[index].State = true;
-                await item.Run();
+                try
+                {
+                    await item.Run();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "DeleteKlineProcessAsync error");
+                }
                 lock (deleteProcessState[index].Lock)
                     deleteProcessState[index].State = false;
-
+                Interlocked.Increment(ref deleteWorkItemCount);
                 logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
 
-                if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteKlineChannel.Reader.Count == 0)
+                if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteKlineChannel.Reader.Count == 0 && deleteWorkItemCount == 3)
                     productionLineWaitEvent.Set();
             }
         }

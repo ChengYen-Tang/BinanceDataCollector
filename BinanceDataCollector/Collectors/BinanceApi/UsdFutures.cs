@@ -36,7 +36,15 @@ internal class UsdFutures : BaseTrade<BinanceFuturesUsdtSymbol>
 
     public override async Task<Result<IEnumerable<BinanceFuturesUsdtSymbol>>> GetMarketAsync(CancellationToken ct = default)
     {
-        WebCallResult<BinanceFuturesUsdtExchangeInfo> result = await client.UsdFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+        WebCallResult<BinanceFuturesUsdtExchangeInfo> result;
+        try
+        {
+            result = await client.UsdFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail(ex.Message);
+        }
         if (!result.Success)
             return Result.Fail(result.Error!.Message);
         return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Contains(x.Name) && x.UnderlyingType == UnderlyingType.Coin));

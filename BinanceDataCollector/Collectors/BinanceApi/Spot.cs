@@ -36,7 +36,15 @@ namespace BinanceDataCollector.Collectors.BinanceApi
 
         public override async Task<Result<IEnumerable<BinanceSymbol>>> GetMarketAsync(CancellationToken ct = default)
         {
-            WebCallResult<BinanceExchangeInfo> result = await client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct);
+            WebCallResult<BinanceExchangeInfo> result;
+            try
+            {
+                result = await client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail(ex.Message);
+            }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Contains(x.Name)));

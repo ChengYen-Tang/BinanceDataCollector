@@ -39,7 +39,7 @@ internal class Worker : IHostedService
                 .UseActivator(new HangfireActivator(serviceProvider))
                 .UseInMemoryStorage();
 
-        //BackgroundJob.Enqueue(() => hangfireJob.RunJob(cts.Token));
+        BackgroundJob.Enqueue(() => hangfireJob.RunJob(cts.Token));
         RecurringJob.AddOrUpdate(() => hangfireJob.RunJob(cts.Token), "30 0 * * *");
         backgroundJobServer = new BackgroundJobServer();
         
@@ -72,17 +72,19 @@ public class HangfireActivator : JobActivator
 
 public class HangfireJob
 {
+    private readonly ILogger<HangfireJob> logger;
     private readonly IServiceProvider serviceProvider;
 
     private static volatile bool isRunning = false;
     
-    public HangfireJob(IServiceProvider serviceProvider) =>
-        this.serviceProvider = serviceProvider;
+    public HangfireJob(ILogger<HangfireJob> logger, IServiceProvider serviceProvider) =>
+        (this.logger, this.serviceProvider) = (logger, serviceProvider);
 
     public async Task RunJob(CancellationToken ct)
     {
         if (isRunning)
             return;
+        logger.LogInformation("HangfireJob running at: {time}", DateTimeOffset.Now);
         isRunning = true;
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider scopeServiceProvider = scope.ServiceProvider;
@@ -91,6 +93,8 @@ public class HangfireJob
             await controller.GatherAsync(ct);
         ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
         productionLine.Wait();
+        productionLine.ResetEvent();
         isRunning = false;
+        logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
     }
 }

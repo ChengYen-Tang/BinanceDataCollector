@@ -36,7 +36,15 @@ internal class CoinFutures : BaseTrade<BinanceFuturesCoinSymbol>
 
     public override async Task<Result<IEnumerable<BinanceFuturesCoinSymbol>>> GetMarketAsync(CancellationToken ct = default)
     {
-        WebCallResult<BinanceFuturesCoinExchangeInfo> result = await client.CoinFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+        WebCallResult<BinanceFuturesCoinExchangeInfo> result;
+        try
+        {
+            result = await client.CoinFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail(ex.Message);
+        }
         if (!result.Success)
             return Result.Fail(result.Error!.Message);
         return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Contains(x.Name) && x.UnderlyingType == UnderlyingType.Coin));
