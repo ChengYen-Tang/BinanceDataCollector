@@ -3,10 +3,12 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace BinanceDataCollector.Migrations
+namespace CollectorModels.Migrations
 {
+    /// <inheritdoc />
     public partial class InitialCreate : Migration
     {
+        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
@@ -87,7 +89,7 @@ namespace BinanceDataCollector.Migrations
                     QuoteAsset = table.Column<string>(type: "nvarchar(450)", nullable: true),
                     QuoteAssetPrecision = table.Column<int>(type: "int", nullable: false),
                     OrderTypes = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    IceBergAllowed = table.Column<bool>(type: "bit", nullable: false),
+                    IcebergAllowed = table.Column<bool>(type: "bit", nullable: false),
                     CancelReplaceAllowed = table.Column<bool>(type: "bit", nullable: false),
                     IsSpotTradingAllowed = table.Column<bool>(type: "bit", nullable: false),
                     AllowTrailingStop = table.Column<bool>(type: "bit", nullable: false),
@@ -134,6 +136,36 @@ namespace BinanceDataCollector.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "FuturesCoinBinancePremiumIndexKlines",
+                columns: table => new
+                {
+                    Id = table.Column<string>(type: "nvarchar(450)", nullable: false),
+                    OpenTime = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    OpenPrice = table.Column<double>(type: "float", nullable: false),
+                    HighPrice = table.Column<double>(type: "float", nullable: false),
+                    LowPrice = table.Column<double>(type: "float", nullable: false),
+                    ClosePrice = table.Column<double>(type: "float", nullable: false),
+                    Volume = table.Column<double>(type: "float", nullable: false),
+                    CloseTime = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    QuoteVolume = table.Column<double>(type: "float", nullable: false),
+                    TradeCount = table.Column<int>(type: "int", nullable: false),
+                    TakerBuyBaseVolume = table.Column<double>(type: "float", nullable: false),
+                    TakerBuyQuoteVolume = table.Column<double>(type: "float", nullable: false),
+                    Interval = table.Column<string>(type: "nvarchar(450)", nullable: false),
+                    SymbolInfoId = table.Column<string>(type: "nvarchar(450)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_FuturesCoinBinancePremiumIndexKlines", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_FuturesCoinBinancePremiumIndexKlines_BinanceFuturesCoinSymbolInfos_SymbolInfoId",
+                        column: x => x.SymbolInfoId,
+                        principalTable: "BinanceFuturesCoinSymbolInfos",
+                        principalColumn: "Name",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "FuturesUsdtBinanceKlines",
                 columns: table => new
                 {
@@ -157,6 +189,36 @@ namespace BinanceDataCollector.Migrations
                     table.PrimaryKey("PK_FuturesUsdtBinanceKlines", x => x.Id);
                     table.ForeignKey(
                         name: "FK_FuturesUsdtBinanceKlines_BinanceFuturesUsdtSymbolInfos_SymbolInfoId",
+                        column: x => x.SymbolInfoId,
+                        principalTable: "BinanceFuturesUsdtSymbolInfos",
+                        principalColumn: "Name",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "FuturesUsdtBinancePremiumIndexKlines",
+                columns: table => new
+                {
+                    Id = table.Column<string>(type: "nvarchar(450)", nullable: false),
+                    OpenTime = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    OpenPrice = table.Column<double>(type: "float", nullable: false),
+                    HighPrice = table.Column<double>(type: "float", nullable: false),
+                    LowPrice = table.Column<double>(type: "float", nullable: false),
+                    ClosePrice = table.Column<double>(type: "float", nullable: false),
+                    Volume = table.Column<double>(type: "float", nullable: false),
+                    CloseTime = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    QuoteVolume = table.Column<double>(type: "float", nullable: false),
+                    TradeCount = table.Column<int>(type: "int", nullable: false),
+                    TakerBuyBaseVolume = table.Column<double>(type: "float", nullable: false),
+                    TakerBuyQuoteVolume = table.Column<double>(type: "float", nullable: false),
+                    Interval = table.Column<string>(type: "nvarchar(450)", nullable: false),
+                    SymbolInfoId = table.Column<string>(type: "nvarchar(450)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_FuturesUsdtBinancePremiumIndexKlines", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_FuturesUsdtBinancePremiumIndexKlines_BinanceFuturesUsdtSymbolInfos_SymbolInfoId",
                         column: x => x.SymbolInfoId,
                         principalTable: "BinanceFuturesUsdtSymbolInfos",
                         principalColumn: "Name",
@@ -269,6 +331,36 @@ namespace BinanceDataCollector.Migrations
                 column: "SymbolInfoId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_FuturesCoinBinancePremiumIndexKlines_CloseTime",
+                table: "FuturesCoinBinancePremiumIndexKlines",
+                column: "CloseTime");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesCoinBinancePremiumIndexKlines_CloseTime_Interval",
+                table: "FuturesCoinBinancePremiumIndexKlines",
+                columns: new[] { "CloseTime", "Interval" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesCoinBinancePremiumIndexKlines_Interval",
+                table: "FuturesCoinBinancePremiumIndexKlines",
+                column: "Interval");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesCoinBinancePremiumIndexKlines_OpenTime",
+                table: "FuturesCoinBinancePremiumIndexKlines",
+                column: "OpenTime");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesCoinBinancePremiumIndexKlines_OpenTime_Interval",
+                table: "FuturesCoinBinancePremiumIndexKlines",
+                columns: new[] { "OpenTime", "Interval" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesCoinBinancePremiumIndexKlines_SymbolInfoId",
+                table: "FuturesCoinBinancePremiumIndexKlines",
+                column: "SymbolInfoId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_FuturesUsdtBinanceKlines_CloseTime",
                 table: "FuturesUsdtBinanceKlines",
                 column: "CloseTime");
@@ -277,36 +369,6 @@ namespace BinanceDataCollector.Migrations
                 name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval",
                 table: "FuturesUsdtBinanceKlines",
                 columns: new[] { "CloseTime", "Interval" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval_ClosePrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "CloseTime", "Interval", "ClosePrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval_HighPrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "CloseTime", "Interval", "HighPrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval_LowPrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "CloseTime", "Interval", "LowPrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval_OpenPrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "CloseTime", "Interval", "OpenPrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval_QuoteVolume",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "CloseTime", "Interval", "QuoteVolume" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_CloseTime_Interval_Volume",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "CloseTime", "Interval", "Volume" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_FuturesUsdtBinanceKlines_Interval",
@@ -324,38 +386,38 @@ namespace BinanceDataCollector.Migrations
                 columns: new[] { "OpenTime", "Interval" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_OpenTime_Interval_ClosePrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "OpenTime", "Interval", "ClosePrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_OpenTime_Interval_HighPrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "OpenTime", "Interval", "HighPrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_OpenTime_Interval_LowPrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "OpenTime", "Interval", "LowPrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_OpenTime_Interval_OpenPrice",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "OpenTime", "Interval", "OpenPrice" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_OpenTime_Interval_QuoteVolume",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "OpenTime", "Interval", "QuoteVolume" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_FuturesUsdtBinanceKlines_OpenTime_Interval_Volume",
-                table: "FuturesUsdtBinanceKlines",
-                columns: new[] { "OpenTime", "Interval", "Volume" });
-
-            migrationBuilder.CreateIndex(
                 name: "IX_FuturesUsdtBinanceKlines_SymbolInfoId",
                 table: "FuturesUsdtBinanceKlines",
+                column: "SymbolInfoId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesUsdtBinancePremiumIndexKlines_CloseTime",
+                table: "FuturesUsdtBinancePremiumIndexKlines",
+                column: "CloseTime");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesUsdtBinancePremiumIndexKlines_CloseTime_Interval",
+                table: "FuturesUsdtBinancePremiumIndexKlines",
+                columns: new[] { "CloseTime", "Interval" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesUsdtBinancePremiumIndexKlines_Interval",
+                table: "FuturesUsdtBinancePremiumIndexKlines",
+                column: "Interval");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesUsdtBinancePremiumIndexKlines_OpenTime",
+                table: "FuturesUsdtBinancePremiumIndexKlines",
+                column: "OpenTime");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesUsdtBinancePremiumIndexKlines_OpenTime_Interval",
+                table: "FuturesUsdtBinancePremiumIndexKlines",
+                columns: new[] { "OpenTime", "Interval" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FuturesUsdtBinancePremiumIndexKlines_SymbolInfoId",
+                table: "FuturesUsdtBinancePremiumIndexKlines",
                 column: "SymbolInfoId");
 
             migrationBuilder.CreateIndex(
@@ -389,13 +451,20 @@ namespace BinanceDataCollector.Migrations
                 column: "SymbolInfoId");
         }
 
+        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
                 name: "FuturesCoinBinanceKlines");
 
             migrationBuilder.DropTable(
+                name: "FuturesCoinBinancePremiumIndexKlines");
+
+            migrationBuilder.DropTable(
                 name: "FuturesUsdtBinanceKlines");
+
+            migrationBuilder.DropTable(
+                name: "FuturesUsdtBinancePremiumIndexKlines");
 
             migrationBuilder.DropTable(
                 name: "SpotBinanceKlines");

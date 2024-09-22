@@ -19,4 +19,5 @@ public class BinanceFuturesCoinSymbolInfo : BinanceFuturesSymbolInfo
     public int EqualQuantityPrecision { get; set; }
 
     public List<FuturesCoinBinanceKline> BinanceKlines { get; set; }
+    public List<FuturesCoinBinancePremiumIndexKline> BinancePremiumIndexKlines { get; set; }
 }

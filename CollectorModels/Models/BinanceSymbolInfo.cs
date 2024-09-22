@@ -43,7 +43,7 @@ public class BinanceSymbolInfo
     /// <summary>
     /// Ice berg orders allowed
     /// </summary>
-    public bool IceBergAllowed { get; set; }
+    public bool IcebergAllowed { get; set; }
     /// <summary>
     /// Cancel replace allowed
     /// </summary>

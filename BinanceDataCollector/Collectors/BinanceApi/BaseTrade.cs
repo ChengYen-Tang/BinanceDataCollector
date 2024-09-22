@@ -1,11 +1,10 @@
-﻿namespace BinanceDataCollector.Collectors.BinanceApi;
+﻿using Binance.Net.Interfaces.Clients;
 
-internal abstract class BaseTrade<T>
+namespace BinanceDataCollector.Collectors.BinanceApi;
+
+internal abstract class BaseTrade<T>(IBinanceRestClient client)
 {
-    protected readonly BinanceClient client;
-
-    public BaseTrade(BinanceClient client)
-        => this.client = client;
+    protected readonly IBinanceRestClient client = client;
 
     public abstract Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     public abstract Task<Result<IEnumerable<T>>> GetMarketAsync(CancellationToken ct = default);

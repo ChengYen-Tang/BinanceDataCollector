@@ -1,8 +1,10 @@
 ﻿using BinanceDataCollector.WorkItems;
 using CollectorModels;
 using CollectorModels.Models;
+using CollectorModels.Models.Csv;
 using CollectorModels.ShardingCore;
 using EFCore.BulkExtensions;
+using Magicodes.ExporterAndImporter.Csv;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -15,10 +17,13 @@ internal abstract class StorageController<T, T1>
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
-    protected readonly static BulkConfig bulkConfig = new() { UseTempDB= true, BatchSize = 14400 };
+    protected readonly static BulkConfig bulkConfig = new() { UseTempDB = true, BatchSize = 14400 };
+    protected static string DataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
+    protected static string RootKlinePath = Path.Combine(DataPath, "Kline");
+    protected abstract string KlinePath { get; }
 
     public StorageController(IServiceProvider serviceProvider, ILogger logger)
-        => (this.serviceProvider, this.logger, yearsReserved) = (serviceProvider, logger, DateTime.Today.AddYears(-1));
+        => (this.serviceProvider, this.logger, yearsReserved) = (serviceProvider, logger, DateTime.Today.AddYears(-3));
 
     public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
     {
@@ -54,10 +59,38 @@ internal abstract class StorageController<T, T1>
             logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new(InsertKlinesAsync, new List<T1>(), ct);
+            return new(InsertKlinesAsync, [], ct);
         }
 
         return new(InsertKlinesAsync, result.Value, ct);
+    }
+
+    public async Task ExportToCsvAsync(CancellationToken ct = default)
+    {
+        Result<string[]> symbolNamesResult = await GetAllSymbolNamesAsync(ct);
+        if (symbolNamesResult.IsFailed)
+        {
+            logger.LogError(symbolNamesResult.Errors[0].Message);
+            return;
+        }
+
+        if (Directory.Exists(KlinePath))
+            Directory.Delete(KlinePath);
+        Directory.CreateDirectory(KlinePath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<Kline[]> klinesResult = await GetCsvKlinesAsync(symbol, ct);
+            if (klinesResult.IsFailed)
+            {
+                logger.LogError(klinesResult.Errors[0].Message);
+                return;
+            }
+
+            string path = Path.Combine(KlinePath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(path, klinesResult.Value);
+        });
     }
 
     protected async Task InsertKlinesAsync(IList<T1> klines, CancellationToken ct = default)
@@ -91,6 +124,10 @@ internal abstract class StorageController<T, T1>
 
     protected abstract Task<Result<List<T1>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
 
-    protected string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
+    protected abstract Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default);
+
+    protected abstract Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default);
+
+    protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
         => $"{symbol}-{interval}-{closeTime:s}";
 }

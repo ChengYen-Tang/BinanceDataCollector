@@ -5,7 +5,7 @@ VisualStudioVersion = 17.0.31710.8
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CollectorModels", "CollectorModels\CollectorModels.csproj", "{2AC3747D-DC1E-43A2-AC15-B815A33EC088}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BinanceDataCollector", "BinanceDataCollector\BinanceDataCollector.csproj", "{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BinanceDataCollector", "BinanceDataCollector\BinanceDataCollector.csproj", "{ADE3F51D-F18D-41B1-891F-3433AA7B4D80}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

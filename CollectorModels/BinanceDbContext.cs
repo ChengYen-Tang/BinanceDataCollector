@@ -12,7 +12,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CollectorModels
 {
-    public class BinanceDbContext : AbstractShardingDbContext, IShardingTableDbContext
+    public class BinanceDbContext(DbContextOptions options) : AbstractShardingDbContext(options), IShardingTableDbContext
     {
         private readonly static EnumCollectionJsonValueConverter<FuturesOrderType> futuresOrderTypeConverter = new();
         private readonly static EnumCollectionJsonValueConverter<TimeInForce> timeInForceConverter = new();
@@ -24,10 +24,6 @@ namespace CollectorModels
         private readonly static CollectionValueComparer<SpotOrderType> spotOrderTypeComparer = new();
         private readonly static CollectionValueComparer<AccountType> accountTypeComparer = new();
         private readonly static CollectionValueComparer<string> stringComparer = new();
-
-        public BinanceDbContext(DbContextOptions options) : base(options)
-        {
-        }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -73,6 +69,9 @@ namespace CollectorModels
             modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
                 .HasMany(item => item.BinanceKlines)
                 .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.BinancePremiumIndexKlines)
+                .WithOne(item => item.SymbolInfo);
             #endregion
             #region BinanceFuturesUsdtSymbolInfo
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
@@ -99,6 +98,9 @@ namespace CollectorModels
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
                 .HasMany(item => item.BinanceKlines)
                 .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.BinancePremiumIndexKlines)
+                .WithOne(item => item.SymbolInfo);
             #endregion
 
             #region SpotBinanceKline
@@ -121,6 +123,16 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesUsdtBinancePremiumIndexKline
+            modelBuilder.Entity<FuturesUsdtBinancePremiumIndexKline>()
+                .Property(e => e.Interval)
+                .HasConversion<string>();
+            modelBuilder.Entity<FuturesUsdtBinancePremiumIndexKline>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.BinancePremiumIndexKlines)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
             #region FuturesCoinBinanceKline
             modelBuilder.Entity<FuturesCoinBinanceKline>()
                 .Property(e => e.Interval)
@@ -131,6 +143,16 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesCoinBinancePremiumIndexKline
+            modelBuilder.Entity<FuturesCoinBinancePremiumIndexKline>()
+                .Property(e => e.Interval)
+                .HasConversion<string>();
+            modelBuilder.Entity<FuturesCoinBinancePremiumIndexKline>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.BinancePremiumIndexKlines)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
         }
 
         public virtual DbSet<BinanceSymbolInfo> BinanceSymbolInfos { get; set; }
@@ -138,8 +160,9 @@ namespace CollectorModels
         public virtual DbSet<BinanceFuturesUsdtSymbolInfo> BinanceFuturesUsdtSymbolInfos { get; set; }
         public virtual DbSet<SpotBinanceKline> SpotBinanceKlines { get; set; }
         public virtual DbSet<FuturesUsdtBinanceKline> FuturesUsdtBinanceKlines { get; set; }
+        public virtual DbSet<FuturesUsdtBinancePremiumIndexKline> FuturesUsdtBinancePremiumIndexKlines { get; set; }
         public virtual DbSet<FuturesCoinBinanceKline> FuturesCoinBinanceKlines { get; set; }
-
+        public virtual DbSet<FuturesCoinBinancePremiumIndexKline> FuturesCoinBinancePremiumIndexKlines { get; set; }
 
         public IRouteTail RouteTail { get; set; }
     }
@@ -151,11 +174,11 @@ namespace CollectorModels
 
         [Key]
         [Required]
-        public Guid Id {  get; set; }
+        public Guid Id { get; set; }
         [Required]
-        public string Name {  get; set; }
+        public string Name { get; set; }
 
-        public ICollection<CoinDataModel> CoinData {  get; set; }
+        public ICollection<CoinDataModel> CoinData { get; set; }
     }
 
     [Index(nameof(CoinId))]
@@ -163,7 +186,7 @@ namespace CollectorModels
     {
         [Key]
         [Required]
-        public string Key {  get; set; }
+        public string Key { get; set; }
         [Required]
         [Column(TypeName = "datetime")]
         public DateTime Date { get; set; }
@@ -195,8 +218,8 @@ namespace CollectorModels
         public decimal TakerBuyQuoteVolume { get; set; }
 
         [Required]
-        public Guid CoinId {  get; set; }
+        public Guid CoinId { get; set; }
         [Required]
-        public virtual CoinModel Coin {  get; set; }
+        public virtual CoinModel Coin { get; set; }
     }
 }

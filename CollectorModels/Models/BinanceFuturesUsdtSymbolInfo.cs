@@ -14,4 +14,5 @@ public class BinanceFuturesUsdtSymbolInfo : BinanceFuturesSymbolInfo
     public double SettlePlan { get; set; }
 
     public List<FuturesUsdtBinanceKline> BinanceKlines { get; set; }
+    public List<FuturesUsdtBinancePremiumIndexKline> BinancePremiumIndexKlines { get; set; }
 }

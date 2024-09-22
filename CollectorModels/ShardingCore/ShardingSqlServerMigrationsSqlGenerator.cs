@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.EntityFrameworkCore.Update;
 using ShardingCore.Core.RuntimeContexts;
 using ShardingCore.Helpers;
 using System.Diagnostics.CodeAnalysis;
@@ -8,13 +9,8 @@ using System.Linq;
 
 namespace CollectorModels.ShardingCore;
 
-public class ShardingSqlServerMigrationsSqlGenerator : SqlServerMigrationsSqlGenerator
+public class ShardingSqlServerMigrationsSqlGenerator(IShardingRuntimeContext shardingRuntimeContext, [NotNull] MigrationsSqlGeneratorDependencies dependencies, [NotNull] ICommandBatchPreparer commandBatchPreparer) : SqlServerMigrationsSqlGenerator(dependencies, commandBatchPreparer)
 {
-    private readonly IShardingRuntimeContext shardingRuntimeContext;
-
-    public ShardingSqlServerMigrationsSqlGenerator(IShardingRuntimeContext shardingRuntimeContext, [NotNull] MigrationsSqlGeneratorDependencies dependencies, [NotNull] IRelationalAnnotationProvider migrationsAnnotations)
-        : base(dependencies, migrationsAnnotations) => this.shardingRuntimeContext = shardingRuntimeContext;
-
     protected override void Generate(
     MigrationOperation operation,
     IModel model,

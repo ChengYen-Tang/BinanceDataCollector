@@ -4,25 +4,23 @@ using CollectorModels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace BinanceDataCollector.Migrations
+namespace CollectorModels.Migrations
 {
     [DbContext(typeof(BinanceDbContext))]
-    [Migration("20221020125116_InitialCreate")]
-    partial class InitialCreate
+    partial class BinanceDbContextModelSnapshot : ModelSnapshot
     {
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "6.0.10")
+                .HasAnnotation("ProductVersion", "8.0.8")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
-            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder, 1L, 1);
+            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
             modelBuilder.Entity("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", b =>
                 {
@@ -215,7 +213,7 @@ namespace BinanceDataCollector.Migrations
                     b.Property<bool>("CancelReplaceAllowed")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IceBergAllowed")
+                    b.Property<bool>("IcebergAllowed")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsMarginTradingAllowed")
@@ -322,6 +320,68 @@ namespace BinanceDataCollector.Migrations
                     b.ToTable("FuturesCoinBinanceKlines");
                 });
 
+            modelBuilder.Entity("CollectorModels.Models.FuturesCoinBinancePremiumIndexKline", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<double>("ClosePrice")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime>("CloseTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double>("HighPrice")
+                        .HasColumnType("float");
+
+                    b.Property<string>("Interval")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<double>("LowPrice")
+                        .HasColumnType("float");
+
+                    b.Property<double>("OpenPrice")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime>("OpenTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double>("QuoteVolume")
+                        .HasColumnType("float");
+
+                    b.Property<string>("SymbolInfoId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<double>("TakerBuyBaseVolume")
+                        .HasColumnType("float");
+
+                    b.Property<double>("TakerBuyQuoteVolume")
+                        .HasColumnType("float");
+
+                    b.Property<int>("TradeCount")
+                        .HasColumnType("int");
+
+                    b.Property<double>("Volume")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CloseTime");
+
+                    b.HasIndex("Interval");
+
+                    b.HasIndex("OpenTime");
+
+                    b.HasIndex("SymbolInfoId");
+
+                    b.HasIndex("CloseTime", "Interval");
+
+                    b.HasIndex("OpenTime", "Interval");
+
+                    b.ToTable("FuturesCoinBinancePremiumIndexKlines");
+                });
+
             modelBuilder.Entity("CollectorModels.Models.FuturesUsdtBinanceKline", b =>
                 {
                     b.Property<string>("Id")
@@ -381,31 +441,69 @@ namespace BinanceDataCollector.Migrations
 
                     b.HasIndex("OpenTime", "Interval");
 
-                    b.HasIndex("CloseTime", "Interval", "ClosePrice");
-
-                    b.HasIndex("CloseTime", "Interval", "HighPrice");
-
-                    b.HasIndex("CloseTime", "Interval", "LowPrice");
-
-                    b.HasIndex("CloseTime", "Interval", "OpenPrice");
-
-                    b.HasIndex("CloseTime", "Interval", "QuoteVolume");
-
-                    b.HasIndex("CloseTime", "Interval", "Volume");
-
-                    b.HasIndex("OpenTime", "Interval", "ClosePrice");
-
-                    b.HasIndex("OpenTime", "Interval", "HighPrice");
-
-                    b.HasIndex("OpenTime", "Interval", "LowPrice");
-
-                    b.HasIndex("OpenTime", "Interval", "OpenPrice");
-
-                    b.HasIndex("OpenTime", "Interval", "QuoteVolume");
-
-                    b.HasIndex("OpenTime", "Interval", "Volume");
-
                     b.ToTable("FuturesUsdtBinanceKlines");
+                });
+
+            modelBuilder.Entity("CollectorModels.Models.FuturesUsdtBinancePremiumIndexKline", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<double>("ClosePrice")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime>("CloseTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double>("HighPrice")
+                        .HasColumnType("float");
+
+                    b.Property<string>("Interval")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<double>("LowPrice")
+                        .HasColumnType("float");
+
+                    b.Property<double>("OpenPrice")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime>("OpenTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double>("QuoteVolume")
+                        .HasColumnType("float");
+
+                    b.Property<string>("SymbolInfoId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<double>("TakerBuyBaseVolume")
+                        .HasColumnType("float");
+
+                    b.Property<double>("TakerBuyQuoteVolume")
+                        .HasColumnType("float");
+
+                    b.Property<int>("TradeCount")
+                        .HasColumnType("int");
+
+                    b.Property<double>("Volume")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CloseTime");
+
+                    b.HasIndex("Interval");
+
+                    b.HasIndex("OpenTime");
+
+                    b.HasIndex("SymbolInfoId");
+
+                    b.HasIndex("CloseTime", "Interval");
+
+                    b.HasIndex("OpenTime", "Interval");
+
+                    b.ToTable("FuturesUsdtBinancePremiumIndexKlines");
                 });
 
             modelBuilder.Entity("CollectorModels.Models.SpotBinanceKline", b =>
@@ -480,10 +578,30 @@ namespace BinanceDataCollector.Migrations
                     b.Navigation("SymbolInfo");
                 });
 
+            modelBuilder.Entity("CollectorModels.Models.FuturesCoinBinancePremiumIndexKline", b =>
+                {
+                    b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
+                        .WithMany("BinancePremiumIndexKlines")
+                        .HasForeignKey("SymbolInfoId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("SymbolInfo");
+                });
+
             modelBuilder.Entity("CollectorModels.Models.FuturesUsdtBinanceKline", b =>
                 {
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceKlines")
+                        .HasForeignKey("SymbolInfoId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("SymbolInfo");
+                });
+
+            modelBuilder.Entity("CollectorModels.Models.FuturesUsdtBinancePremiumIndexKline", b =>
+                {
+                    b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
+                        .WithMany("BinancePremiumIndexKlines")
                         .HasForeignKey("SymbolInfoId")
                         .OnDelete(DeleteBehavior.Cascade);
 
@@ -503,11 +621,15 @@ namespace BinanceDataCollector.Migrations
             modelBuilder.Entity("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", b =>
                 {
                     b.Navigation("BinanceKlines");
+
+                    b.Navigation("BinancePremiumIndexKlines");
                 });
 
             modelBuilder.Entity("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", b =>
                 {
                     b.Navigation("BinanceKlines");
+
+                    b.Navigation("BinancePremiumIndexKlines");
                 });
 
             modelBuilder.Entity("CollectorModels.Models.BinanceSymbolInfo", b =>

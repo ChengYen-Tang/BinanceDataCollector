@@ -1,25 +1,20 @@
-﻿using Binance.Net.Objects.Models.Futures;
+﻿using Binance.Net.Interfaces.Clients;
+using Binance.Net.Objects.Models.Futures;
 
 namespace BinanceDataCollector.Collectors.BinanceApi;
 
-internal class CoinFutures : BaseTrade<BinanceFuturesCoinSymbol>
+internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : BaseTrade<BinanceFuturesCoinSymbol>(client)
 {
-    private readonly string[] ignoneCoins;
-    public CoinFutures(BinanceClient client, string[] ignoneCoins)
-        : base(client) => this.ignoneCoins = ignoneCoins;
-
     public override async Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         DateTime endTime = DateTime.Today;
-        List<IBinanceKline> klines = new();
+        List<IBinanceKline> klines = [];
         while (startTime < endTime)
         {
             WebCallResult<IEnumerable<IBinanceKline>> result;
             try
             {
-                result = (endTime - startTime).Days < 200 ?
-                await client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1000, ct) :
-                await client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, startTime.AddDays(200), 1000, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
             }
             catch (Exception ex)
             {
@@ -29,7 +24,6 @@ internal class CoinFutures : BaseTrade<BinanceFuturesCoinSymbol>
                 return Result.Fail(result.Error!.Message);
             startTime = result.Data.Any() ? result.Data.Last().CloseTime : startTime.AddDays(200);
             klines.AddRange(result.Data);
-            await Task.Delay(500, ct);
         }
         return Result.Ok(klines);
     }
@@ -39,7 +33,7 @@ internal class CoinFutures : BaseTrade<BinanceFuturesCoinSymbol>
         WebCallResult<BinanceFuturesCoinExchangeInfo> result;
         try
         {
-            result = await client.CoinFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+            result = await base.client.CoinFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
         }
         catch (Exception ex)
         {
@@ -47,6 +41,6 @@ internal class CoinFutures : BaseTrade<BinanceFuturesCoinSymbol>
         }
         if (!result.Success)
             return Result.Fail(result.Error!.Message);
-        return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Contains(x.Name) && x.UnderlyingType == UnderlyingType.Coin));
+        return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Any(ic => x.Name.Contains(ic) && !x.Name.Contains("1000") && !x.Name.Contains('_')) && x.UnderlyingType == UnderlyingType.Coin && x.ContractType == ContractType.Perpetual && x.Status == SymbolStatus.Trading));
     }
 }

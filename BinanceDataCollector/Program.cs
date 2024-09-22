@@ -11,7 +11,7 @@ IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureLogging(logging =>
     {
         string outputTemplate = "{Timestamp:o} {RequestId,13} [{Level:u3}] [{SourceContext} {Method}] {Message} ({EventId:x8}){NewLine}{Exception}";
-        Dictionary<string, LogLevel> levelOverrides = new() { { "Default", LogLevel.Information }, { "Microsoft.Hosting.Lifetime", LogLevel.Information }, { "Microsoft.EntityFrameworkCore", LogLevel.Error } };
+        Dictionary<string, LogLevel> levelOverrides = new() { { "Default", LogLevel.Information }, { "Microsoft.Hosting.Lifetime", LogLevel.Information }, { "System.Net.Http.HttpClient", LogLevel.Error }, };
 #if DEBUG
         logging.SetMinimumLevel(LogLevel.Debug);
         logging.AddFile("Logs/{Date}.txt", LogLevel.Debug, levelOverrides, outputTemplate: outputTemplate);
@@ -25,7 +25,15 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<HangfireJob>();
         services.AddSingleton<ProductionLine>();
 
-        services.AddScoped<BinanceClient>();
+        services.AddBinance(x =>
+            {
+                x.RateLimiterEnabled = true;
+                x.RateLimitingBehaviour = RateLimitingBehaviour.Wait;
+            }, x =>
+            {
+                x.RateLimiterEnabled = true;
+                x.RateLimitingBehaviour = RateLimitingBehaviour.Wait;
+            });
         services.AddScoped<ICollectorController, SpotCollectorController>();
         services.AddScoped<ICollectorController, CoinFuturesCollectorController>();
         services.AddScoped<ICollectorController, UsdFuturesCollectorController>();
@@ -40,24 +48,27 @@ IHost host = Host.CreateDefaultBuilder(args)
                 {
                     op.AddShardingTableRoute<SpotBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtBinanceKlineVirtualTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtBinancePremiumIndexKlineTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinanceKlineVirtualTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinBinancePremiumIndexKlineTableRoute>();
                 }).UseConfig(op =>
                 {
                     op.ThrowIfQueryRouteNotMatch = false;
                     op.UseShardingQuery((connStr, builder) =>
                     {
                         //connStr is delegate input param
-                        builder.UseSqlServer(connStr, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
+                        builder.UseSqlServer(connStr, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); });
                     });
                     op.UseShardingTransaction((connection, builder) =>
                     {
                         //connection is delegate input param
-                        builder.UseSqlServer(connection, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); opts.MigrationsAssembly("BinanceDataCollector"); });
+                        builder.UseSqlServer(connection, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); });
                     });
                     //use your data base connection string
-                    op.AddDefaultDataSource(Guid.NewGuid().ToString("n"),
+                    op.AddDefaultDataSource("DefaultConnection",
                         hostContext.Configuration["ConnectionStrings:DefaultConnection"]);
-                    op.UseShardingMigrationConfigure(b => {
+                    op.UseShardingMigrationConfigure(b =>
+                    {
                         b.ReplaceService<IMigrationsSqlGenerator, ShardingSqlServerMigrationsSqlGenerator>();
                     });
                 }).AddShardingCore();

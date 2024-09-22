@@ -23,7 +23,7 @@ internal class ProductionLine
 
     public ProductionLine(IConfiguration configuration, ILogger<ProductionLine> logger)
         => (this.configuration, this.logger, GetLastTimeChannel, GatherKlineChannel, InsertKlineChannel, DeleteKlineChannel, tasks, isRunning, deleteWaitEvent, productionLineWaitEvent)
-        = (configuration, logger, Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateBounded<IAsymcWorkItem>(10), Channel.CreateUnbounded<IAsymcWorkItem>(), new(), false, new(false), new(false));
+        = (configuration, logger, Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateBounded<IAsymcWorkItem>(10), Channel.CreateUnbounded<IAsymcWorkItem>(), [], false, new(false), new(false));
 
     public void Start()
     {
@@ -53,25 +53,25 @@ internal class ProductionLine
         ResetEvent();
         isRunning = true;
     }
-    
+
     public void Stop()
     {
         if (!isRunning)
             return;
         cancellationTokenSource.Cancel();
-        Task.WaitAll(tasks.ToArray());
+        Task.WaitAll([.. tasks]);
         cancellationTokenSource.Dispose();
         tasks.Clear();
         isRunning = false;
     }
-    
+
     public void ResetEvent()
     {
         deleteWorkItemCount = 0;
         deleteWaitEvent.Reset();
         productionLineWaitEvent.Reset();
     }
-    
+
     public void Wait()
         => productionLineWaitEvent.WaitOne();
 
@@ -89,7 +89,7 @@ internal class ProductionLine
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "GetLastTimeProcessAsync error");
-                }    
+                }
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
         }
@@ -124,7 +124,7 @@ internal class ProductionLine
         {
             if (InsertKlineChannel.Reader.TryRead(out IAsymcWorkItem? item))
             {
-                lock(lastProcessState[index].Lock)
+                lock (lastProcessState[index].Lock)
                     lastProcessState[index].State = true;
                 try
                 {

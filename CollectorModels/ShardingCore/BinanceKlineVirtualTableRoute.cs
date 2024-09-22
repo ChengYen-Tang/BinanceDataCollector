@@ -9,7 +9,6 @@ using ShardingCore.TableCreator;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Threading;
 
 namespace CollectorModels.ShardingCore;
@@ -21,7 +20,7 @@ public class BinanceKlineVirtualTableRoute<T> : AbstractShardingOperatorVirtualT
     private readonly IVirtualDataSource virtualDataSource;
     private readonly HashSet<string> tails;
     private readonly ReaderWriterLockSlim tailsLock;
-    private string CurrentTableName;
+    private readonly string CurrentTableName;
 
     private const string Tables = "Tables";
     private const string TABLE_SCHEMA = "TABLE_SCHEMA";
@@ -30,7 +29,7 @@ public class BinanceKlineVirtualTableRoute<T> : AbstractShardingOperatorVirtualT
     public BinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource)
     {
         CurrentTableName = typeof(T).Name;
-        tails = new();
+        tails = [];
         tailsLock = new(LockRecursionPolicy.SupportsRecursion);
         this.tableCreator = tableCreator;
         this.virtualDataSource = virtualDataSource;
@@ -90,7 +89,7 @@ public class BinanceKlineVirtualTableRoute<T> : AbstractShardingOperatorVirtualT
         tailsLock.EnterReadLock();
         try
         {
-            return tails.ToList();
+            return [.. tails];
         }
         finally
         {
@@ -124,20 +123,22 @@ public class BinanceKlineVirtualTableRoute<T> : AbstractShardingOperatorVirtualT
         => shardingKey.ToString();
 }
 
-public class SpotBinanceKlineVirtualTableRoute : BinanceKlineVirtualTableRoute<SpotBinanceKline>
+public class SpotBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<SpotBinanceKline>(tableCreator, virtualDataSource)
 {
-    public SpotBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource)
-        : base(tableCreator, virtualDataSource) { }
 }
 
-public class FuturesUsdtBinanceKlineVirtualTableRoute : BinanceKlineVirtualTableRoute<FuturesUsdtBinanceKline>
+public class FuturesUsdtBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesUsdtBinanceKline>(tableCreator, virtualDataSource)
 {
-    public FuturesUsdtBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource)
-    : base(tableCreator, virtualDataSource) { }
 }
 
-public class FuturesCoinBinanceKlineVirtualTableRoute : BinanceKlineVirtualTableRoute<FuturesCoinBinanceKline>
+public class FuturesUsdtBinancePremiumIndexKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesUsdtBinancePremiumIndexKline>(tableCreator, virtualDataSource)
 {
-    public FuturesCoinBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource)
-    : base(tableCreator, virtualDataSource) { }
+}
+
+public class FuturesCoinBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesCoinBinanceKline>(tableCreator, virtualDataSource)
+{
+}
+
+public class FuturesCoinBinancePremiumIndexKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesCoinBinancePremiumIndexKline>(tableCreator, virtualDataSource)
+{
 }

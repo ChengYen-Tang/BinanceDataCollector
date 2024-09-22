@@ -1,27 +1,15 @@
 using BinanceDataCollector.Collectors.CollectorControllers;
 using CollectorModels;
 using Hangfire;
+using Hangfire.InMemory;
 using Microsoft.EntityFrameworkCore;
 
 namespace BinanceDataCollector;
 
-internal class Worker : IHostedService
+internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, HangfireJob hangfireJob, ProductionLine productionLine) : IHostedService
 {
-    private readonly ILogger<Worker> logger;
-    private readonly IServiceProvider serviceProvider;
-    private readonly HangfireJob hangfireJob;
-    private readonly CancellationTokenSource cts;
-    private readonly ProductionLine productionLine;
+    private readonly CancellationTokenSource cts = new();
     private BackgroundJobServer backgroundJobServer = null!;
-
-    public Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, HangfireJob hangfireJob, ProductionLine productionLine)
-    {
-        this.logger = logger;
-        this.serviceProvider = serviceProvider;
-        this.hangfireJob = hangfireJob;
-        this.productionLine = productionLine;
-        cts = new();
-    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -32,17 +20,20 @@ internal class Worker : IHostedService
         if (db.Database.GetPendingMigrations().Any())
             db.Database.Migrate();
         GlobalConfiguration.Configuration
-                .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
                 .UseColouredConsoleLogProvider()
                 .UseSimpleAssemblyNameTypeSerializer()
                 .UseRecommendedSerializerSettings()
                 .UseActivator(new HangfireActivator(serviceProvider))
-                .UseInMemoryStorage();
+                .UseInMemoryStorage(new InMemoryStorageOptions
+                {
+                    MaxExpirationTime = TimeSpan.FromDays(30)
+                });
 
-        BackgroundJob.Enqueue(() => hangfireJob.RunJob(cts.Token));
-        RecurringJob.AddOrUpdate(() => hangfireJob.RunJob(cts.Token), "30 0 * * *");
+        RecurringJob.AddOrUpdate("Sync", () => hangfireJob.RunJob(cts.Token), Cron.Daily, new() { TimeZone = TimeZoneInfo.Utc });
+        RecurringJob.TriggerJob("Sync");
         backgroundJobServer = new BackgroundJobServer();
-        
+
         logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
         return Task.CompletedTask;
     }
@@ -57,13 +48,8 @@ internal class Worker : IHostedService
     }
 }
 
-public class HangfireActivator : JobActivator
+public class HangfireActivator(IServiceProvider serviceProvider) : JobActivator
 {
-    private readonly IServiceProvider serviceProvider;
-
-    public HangfireActivator(IServiceProvider serviceProvider) =>
-        this.serviceProvider = serviceProvider;
-
     public override object ActivateJob(Type jobType)
     {
         return serviceProvider.GetService(jobType)!;
@@ -76,7 +62,7 @@ public class HangfireJob
     private readonly IServiceProvider serviceProvider;
 
     private static volatile bool isRunning = false;
-    
+
     public HangfireJob(ILogger<HangfireJob> logger, IServiceProvider serviceProvider) =>
         (this.logger, this.serviceProvider) = (logger, serviceProvider);
 
@@ -94,6 +80,8 @@ public class HangfireJob
         ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
         productionLine.Wait();
         productionLine.ResetEvent();
+        foreach (ICollectorController controller in controllers)
+            await controller.ExportToCsvAsync(ct);
         isRunning = false;
         logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
     }

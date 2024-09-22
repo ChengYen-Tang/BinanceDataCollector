@@ -1,7 +1,9 @@
-﻿using Binance.Net.Objects.Models.Spot;
+﻿using Binance.Net.Interfaces.Clients;
+using Binance.Net.Objects.Models.Spot;
 using BinanceDataCollector.Collectors.BinanceApi;
 using CollectorModels;
 using CollectorModels.Models;
+using CollectorModels.Models.Csv;
 using CollectorModels.ShardingCore;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
@@ -12,9 +14,11 @@ namespace BinanceDataCollector.StorageControllers;
 internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline>
 {
     private readonly Spot spot;
-    
-    public SpotStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<SpotStorageController> logger, BinanceClient client)
-        : base(serviceProvider, logger) => (spot) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? Array.Empty<string>()));
+
+    public SpotStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<SpotStorageController> logger, IBinanceRestClient client)
+        : base(serviceProvider, logger) => (spot) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? []));
+
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, "Spot"); } }
 
     public override async Task DeleteOldKlines(CancellationToken ct = default)
     {
@@ -40,6 +44,41 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         return (await db.SpotBinanceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
             ? await db.SpotBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
+    }
+
+    protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        string[] symbols = await db.BinanceSymbolInfos.AsNoTracking().Select(item => item.Name).ToArrayAsync(ct);
+        if (symbols.Length == 0)
+            return Result.Fail("No symbols found.");
+        return Result.Ok(symbols);
+    }
+
+    protected override async Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        Kline[] klines = await db.SpotBinanceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new Kline
+        {
+            OpenTime = item.OpenTime,
+            OpenPrice = item.OpenPrice,
+            HighPrice = item.HighPrice,
+            LowPrice = item.LowPrice,
+            ClosePrice = item.ClosePrice,
+            Volume = item.Volume,
+            QuoteVolume = item.QuoteVolume,
+            TakerBuyBaseVolume = item.TakerBuyBaseVolume,
+            TakerBuyQuoteVolume = item.TakerBuyQuoteVolume,
+            TradeCount = item.TradeCount,
+            CloseTime = item.CloseTime
+        }).ToArrayAsync(ct);
+        if (klines.Length == 0)
+            return Result.Fail("No klines found.");
+        return Result.Ok(klines);
     }
 
     protected override async Task<Result<List<SpotBinanceKline>>> GetKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -80,7 +119,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
             BaseFeePrecision = symbol.BaseFeePrecision,
             AllowTrailingStop = symbol.AllowTrailingStop,
             CancelReplaceAllowed = symbol.CancelReplaceAllowed,
-            IceBergAllowed = symbol.IceBergAllowed,
+            IcebergAllowed = symbol.IcebergAllowed,
             IsMarginTradingAllowed = symbol.IsMarginTradingAllowed,
             IsSpotTradingAllowed = symbol.IsSpotTradingAllowed,
             OCOAllowed = symbol.OCOAllowed,

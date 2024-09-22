@@ -37,15 +37,13 @@ internal abstract class CollectorController<T, T1> : ICollectorController
 
     private async Task GetLastTimeAsync(T symbol, CancellationToken ct = default)
     {
-        foreach (KlineInterval interval in Enum.GetValues<KlineInterval>().Where(item => item != KlineInterval.OneSecond))
-        {
-            if (ct.IsCancellationRequested)
-                return;
-            DateTime startTime = await storageController.GetLastTimeAsync(symbol, interval, ct);
-            AsyncWorkItem<T, KlineInterval, DateTime> workItem = new(GatherKlinesAsync, symbol, interval, startTime, ct);
-            if (await productionLine.GatherKlineChannel.Writer.WaitToWriteAsync(ct))
-                await productionLine.GatherKlineChannel.Writer.WriteAsync(workItem, ct);
-        }
+        KlineInterval interval = KlineInterval.OneMinute;
+        if (ct.IsCancellationRequested)
+            return;
+        DateTime startTime = await storageController.GetLastTimeAsync(symbol, interval, ct);
+        AsyncWorkItem<T, KlineInterval, DateTime> workItem = new(GatherKlinesAsync, symbol, interval, startTime, ct);
+        if (await productionLine.GatherKlineChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherKlineChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -57,6 +55,9 @@ internal abstract class CollectorController<T, T1> : ICollectorController
 
     private AsyncWorkItem DeleteOldKlines(CancellationToken ct = default)
         => new(storageController.DeleteOldKlines, ct);
+
+    public Task ExportToCsvAsync(CancellationToken ct = default)
+        => storageController.ExportToCsvAsync(ct);
 }
 
 internal class SpotCollectorController : CollectorController<BinanceSymbolInfo, SpotBinanceKline>

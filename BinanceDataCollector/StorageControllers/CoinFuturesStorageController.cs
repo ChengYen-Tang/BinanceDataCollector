@@ -1,7 +1,9 @@
-﻿using Binance.Net.Objects.Models.Futures;
+﻿using Binance.Net.Interfaces.Clients;
+using Binance.Net.Objects.Models.Futures;
 using BinanceDataCollector.Collectors.BinanceApi;
 using CollectorModels;
 using CollectorModels.Models;
+using CollectorModels.Models.Csv;
 using CollectorModels.ShardingCore;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
@@ -13,8 +15,10 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
 {
     private readonly CoinFutures coinFutures;
 
-    public CoinFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, BinanceClient client)
-        : base(serviceProvider, logger) => (coinFutures) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? Array.Empty<string>()));
+    public CoinFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, IBinanceRestClient client)
+        : base(serviceProvider, logger) => (coinFutures) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? []));
+
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, "CoinFutures"); } }
 
     public override async Task DeleteOldKlines(CancellationToken ct = default)
     {
@@ -40,6 +44,41 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         return (await db.FuturesCoinBinanceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
             ? await db.FuturesCoinBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
+    }
+
+    protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        string[] symbols = await db.BinanceFuturesCoinSymbolInfos.AsNoTracking().Select(item => item.Name).ToArrayAsync(ct);
+        if (symbols.Length == 0)
+            return Result.Fail("No symbols found.");
+        return Result.Ok(symbols);
+    }
+
+    protected override async Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        Kline[] klines = await db.FuturesCoinBinanceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new Kline
+        {
+            OpenTime = item.OpenTime,
+            OpenPrice = item.OpenPrice,
+            HighPrice = item.HighPrice,
+            LowPrice = item.LowPrice,
+            ClosePrice = item.ClosePrice,
+            Volume = item.Volume,
+            QuoteVolume = item.QuoteVolume,
+            TakerBuyBaseVolume = item.TakerBuyBaseVolume,
+            TakerBuyQuoteVolume = item.TakerBuyQuoteVolume,
+            TradeCount = item.TradeCount,
+            CloseTime = item.CloseTime
+        }).ToArrayAsync(ct);
+        if (klines.Length == 0)
+            return Result.Fail("No klines found.");
+        return Result.Ok(klines);
     }
 
     protected override async Task<Result<List<FuturesCoinBinanceKline>>> GetKlinesAsync(BinanceFuturesCoinSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)

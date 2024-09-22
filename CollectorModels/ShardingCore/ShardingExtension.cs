@@ -1,14 +1,14 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using ShardingCore.Core.VirtualRoutes.DataSourceRoutes.RouteRuleEngine;
-using ShardingCore.Core.VirtualRoutes.TableRoutes.RouteTails.Abstractions;
 using ShardingCore.Core.VirtualRoutes.TableRoutes;
+using ShardingCore.Core.VirtualRoutes.TableRoutes.RouteTails.Abstractions;
 using ShardingCore.Exceptions;
 using ShardingCore.Extensions;
 using ShardingCore.Sharding.Abstractions;
-using System.Collections.Generic;
-using System.Linq.Expressions;
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 
 namespace CollectorModels.ShardingCore;
 
@@ -26,7 +26,7 @@ public static class ShardingExtension
         IEnumerable<TEntity> entities) where TShardingDbContext : DbContext, IShardingDbContext where TEntity : class
     {
         if (entities.IsEmpty())
-            return new Dictionary<string, Dictionary<DbContext, IEnumerable<TEntity>>>();
+            return [];
         var shardingRuntimeContext = shardingDbContext.GetShardingRuntimeContext();
         var entityType = typeof(TEntity);
         var routeTailFactory = shardingRuntimeContext.GetRouteTailFactory();
@@ -46,7 +46,7 @@ public static class ShardingExtension
                         new Dictionary<DbContext, IEnumerable<TEntity>>()
                         {
                             {
-                                shardingDbContext.CreateGenericDbContext(entitiesArray[0]),
+                                shardingDbContext.CreateShardingDbContextExecutor().CreateGenericDbContext(entitiesArray[0]),
                                 entitiesArray
                             }
                         }
@@ -89,7 +89,7 @@ public static class ShardingExtension
                         $" data source name :[{shardingDataSourceName}] all data source names:[{string.Join(",", allDataSourceNames)}]");
                 if (!dataSourceNames.TryGetValue(shardingDataSourceName, out var bulkDicEntries))
                 {
-                    bulkDicEntries = new Dictionary<string, BulkDicEntry<TEntity>>();
+                    bulkDicEntries = [];
                     dataSourceNames.Add(shardingDataSourceName, bulkDicEntries);
                 }
 
@@ -120,7 +120,7 @@ public static class ShardingExtension
         if (!allTails.Contains(tail))
         {
             //不在alltails说明需要新增那么调用routewithvalue就会处理对应tail
-            var tableRouteUnit = tableRoute.RouteWithValue(new DataSourceRouteResult(new HashSet<string>(new[] { dataSourceName })),
+            var tableRouteUnit = tableRoute.RouteWithValue(new DataSourceRouteResult(new HashSet<string>([dataSourceName])),
                 shardingKey);
             if (tableRouteUnit.Tail != tail)
             {
@@ -179,7 +179,7 @@ public static class ShardingExtension
         //if (!entityMetadataManager.IsShardingTable(typeof(TEntity)))
         //    throw new ShardingCoreInvalidOperationException(typeof(TEntity).FullName);
         if (entities.IsEmpty())
-            return new Dictionary<DbContext, IEnumerable<TEntity>>();
+            return [];
         return shardingDbContext.BulkShardingEnumerable(entities).First().Value;
     }
     /// <summary>
