@@ -14,7 +14,7 @@ using System.Threading;
 namespace CollectorModels.ShardingCore;
 
 public class BinanceKlineVirtualTableRoute<T> : AbstractShardingOperatorVirtualTableRoute<T, string>
-    where T : BinanceKline
+    where T : BinanceMarkIndexKline
 {
     private readonly IShardingTableCreator tableCreator;
     private readonly IVirtualDataSource virtualDataSource;

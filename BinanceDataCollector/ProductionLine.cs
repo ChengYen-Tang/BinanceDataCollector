@@ -169,7 +169,8 @@ internal class ProductionLine
                 Interlocked.Increment(ref deleteWorkItemCount);
                 logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherKlineChannel:{GatherKlineChannel.Reader.Count}, InsertKlineChannel:{InsertKlineChannel.Reader.Count}, DeleteKlineChannel:{DeleteKlineChannel.Reader.Count}");
 
-                if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteKlineChannel.Reader.Count == 0 && deleteWorkItemCount == 3)
+                int requiredDeleteWorkItemCount = Convert.ToInt32(configuration.GetValue("Market:Spot:IsEnabled", true)) + Convert.ToInt32(configuration.GetValue("Market:CoinFutures:IsEnabled", true)) + Convert.ToInt32(configuration.GetValue("Market:UsdFutures:IsEnabled", true));
+                if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteKlineChannel.Reader.Count == 0 && deleteWorkItemCount == requiredDeleteWorkItemCount)
                     productionLineWaitEvent.Set();
             }
         }

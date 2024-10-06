@@ -1,5 +1,6 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Futures;
+using Binance.Net.Objects.Models.Spot;
 
 namespace BinanceDataCollector.Collectors.BinanceApi;
 
@@ -15,6 +16,29 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             try
             {
                 result = await base.client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail(ex.Message);
+            }
+            if (!result.Success)
+                return Result.Fail(result.Error!.Message);
+            startTime = result.Data.Any() ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            klines.AddRange(result.Data);
+        }
+        return Result.Ok(klines);
+    }
+
+    public override async Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        DateTime endTime = DateTime.Today;
+        List<BinanceMarkIndexKline> klines = [];
+        while (startTime < endTime)
+        {
+            WebCallResult<IEnumerable<BinanceMarkIndexKline>> result;
+            try
+            {
+                result = await base.client.CoinFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
             }
             catch (Exception ex)
             {

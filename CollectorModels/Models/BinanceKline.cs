@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace CollectorModels.Models;
 
-public class BinanceKline
+public class BinanceMarkIndexKline
 {
     /// <summary>
     /// The time this candlestick opened
@@ -33,14 +33,24 @@ public class BinanceKline
     public double ClosePrice { get; set; }
 
     /// <summary>
-    /// The volume traded during this candlestick
-    /// </summary>
-    public double Volume { get; set; }
-
-    /// <summary>
     /// The close time of this candlestick
     /// </summary>
     public DateTime CloseTime { get; set; }
+
+    public KlineInterval Interval { get; set; }
+
+    [Key]
+    public string Id { get; set; }
+
+    public string SymbolInfoId { get; set; }
+}
+
+public class BinanceKline : BinanceMarkIndexKline
+{
+    /// <summary>
+    /// The volume traded during this candlestick
+    /// </summary>
+    public double Volume { get; set; }
 
     /// <summary>
     /// The volume traded during this candlestick in the asset form
@@ -61,13 +71,6 @@ public class BinanceKline
     /// Taker buy quote asset volume
     /// </summary>
     public double TakerBuyQuoteVolume { get; set; }
-
-    public KlineInterval Interval { get; set; }
-
-    [Key]
-    public string Id { get; set; }
-
-    public string SymbolInfoId { get; set; }
 }
 
 [Index(nameof(CloseTime))]
@@ -95,7 +98,7 @@ public class FuturesUsdtBinanceKline : BinanceKline
 [Index(nameof(Interval))]
 [Index(nameof(CloseTime), nameof(Interval))]
 [Index(nameof(OpenTime), nameof(Interval))]
-public class FuturesUsdtBinancePremiumIndexKline : BinanceKline
+public class FuturesUsdtBinancePremiumIndexKline : BinanceMarkIndexKline
 {
     public BinanceFuturesUsdtSymbolInfo SymbolInfo { get; set; }
 }
@@ -115,7 +118,7 @@ public class FuturesCoinBinanceKline : BinanceKline
 [Index(nameof(Interval))]
 [Index(nameof(CloseTime), nameof(Interval))]
 [Index(nameof(OpenTime), nameof(Interval))]
-public class FuturesCoinBinancePremiumIndexKline : BinanceKline
+public class FuturesCoinBinancePremiumIndexKline : BinanceMarkIndexKline
 {
     public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
 }

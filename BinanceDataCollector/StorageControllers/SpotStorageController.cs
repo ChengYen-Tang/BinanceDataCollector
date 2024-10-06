@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline>
+internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, BinanceKline?>
 {
     private readonly Spot spot;
 
@@ -19,6 +19,8 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         : base(serviceProvider, logger) => (spot) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? []));
 
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "Spot"); } }
+    protected override string PremiumIndexKlinePath => throw new NotImplementedException();
+    protected override bool IsFutures => false;
 
     public override async Task DeleteOldKlines(CancellationToken ct = default)
     {
@@ -106,6 +108,9 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         }).ToList());
     }
 
+    protected override Task<Result<List<BinanceKline?>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
     protected override async Task<Result<List<BinanceSymbolInfo>>> GetMarketAsync(CancellationToken ct = default)
     {
         Result<IEnumerable<BinanceSymbol>> result = await spot.GetMarketAsync(ct);
@@ -134,4 +139,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
         return Result.Ok(markets);
     }
+
+    protected override Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default)
+        => throw new NotImplementedException();
 }

@@ -30,6 +30,9 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             return Result.Ok(klines);
         }
 
+        public override Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
         public override async Task<Result<IEnumerable<BinanceSymbol>>> GetMarketAsync(CancellationToken ct = default)
         {
             WebCallResult<BinanceExchangeInfo> result;

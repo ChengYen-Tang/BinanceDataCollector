@@ -3,7 +3,7 @@ using System;
 
 namespace CollectorModels.Models.Csv;
 
-public class Kline
+public class PremiumIndexKline
 {
     /// <summary>
     /// The time this candlestick opened
@@ -32,33 +32,8 @@ public class Kline
     public double ClosePrice { get; set; }
 
     /// <summary>
-    /// The volume traded during this candlestick
-    /// </summary>
-    public double Volume { get; set; }
-
-    /// <summary>
     /// The close time of this candlestick
     /// </summary>
     [ExporterHeader(Format = "s")]
     public DateTime CloseTime { get; set; }
-
-    /// <summary>
-    /// The volume traded during this candlestick in the asset form
-    /// </summary>
-    public double QuoteVolume { get; set; }
-
-    /// <summary>
-    /// The amount of trades in this candlestick
-    /// </summary>
-    public int TradeCount { get; set; }
-
-    /// <summary>
-    /// Taker buy base asset volume
-    /// </summary>
-    public double TakerBuyBaseVolume { get; set; }
-
-    /// <summary>
-    /// Taker buy quote asset volume
-    /// </summary>
-    public double TakerBuyQuoteVolume { get; set; }
 }
