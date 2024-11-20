@@ -38,7 +38,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             WebCallResult<BinanceExchangeInfo> result;
             try
             {
-                result = await base.client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct);
+                result = await base.client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct: ct);
             }
             catch (Exception ex)
             {
