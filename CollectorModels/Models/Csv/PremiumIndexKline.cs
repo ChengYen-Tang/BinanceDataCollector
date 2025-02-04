@@ -1,15 +1,11 @@
-﻿using Magicodes.ExporterAndImporter.Core;
-using System;
-
-namespace CollectorModels.Models.Csv;
+﻿namespace CollectorModels.Models.Csv;
 
 public class PremiumIndexKline
 {
     /// <summary>
     /// The time this candlestick opened
     /// </summary>
-    [ExporterHeader(Format = "s")]
-    public DateTime OpenTime { get; set; }
+    public long OpenTime { get; set; }
 
     /// <summary>
     /// The price at which this candlestick opened
@@ -34,6 +30,5 @@ public class PremiumIndexKline
     /// <summary>
     /// The close time of this candlestick
     /// </summary>
-    [ExporterHeader(Format = "s")]
-    public DateTime CloseTime { get; set; }
+    public long CloseTime { get; set; }
 }

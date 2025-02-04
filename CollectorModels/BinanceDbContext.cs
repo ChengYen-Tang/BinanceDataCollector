@@ -17,12 +17,12 @@ namespace CollectorModels
         private readonly static EnumCollectionJsonValueConverter<FuturesOrderType> futuresOrderTypeConverter = new();
         private readonly static EnumCollectionJsonValueConverter<TimeInForce> timeInForceConverter = new();
         private readonly static EnumCollectionJsonValueConverter<SpotOrderType> spotOrderTypeConverter = new();
-        private readonly static EnumCollectionJsonValueConverter<AccountType> accountTypeConverter = new();
+        private readonly static EnumCollectionJsonValueConverter<PermissionType> permissionTypeConverter = new();
         private readonly static StringCollectionJsonValueConverter stringConverter = new();
         private readonly static CollectionValueComparer<FuturesOrderType> futuresOrderTypeComparer = new();
         private readonly static CollectionValueComparer<TimeInForce> timeInForceComparer = new();
         private readonly static CollectionValueComparer<SpotOrderType> spotOrderTypeComparer = new();
-        private readonly static CollectionValueComparer<AccountType> accountTypeComparer = new();
+        private readonly static CollectionValueComparer<PermissionType> permissionTypeComparer = new();
         private readonly static CollectionValueComparer<string> stringComparer = new();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -38,8 +38,8 @@ namespace CollectorModels
                 .Metadata.SetValueComparer(spotOrderTypeComparer);
             modelBuilder.Entity<BinanceSymbolInfo>()
                 .Property(item => item.Permissions)
-                .HasConversion(accountTypeConverter)
-                .Metadata.SetValueComparer(accountTypeComparer);
+                .HasConversion(permissionTypeConverter)
+                .Metadata.SetValueComparer(permissionTypeComparer);
             modelBuilder.Entity<BinanceSymbolInfo>()
                 .HasMany(item => item.BinanceKlines)
                 .WithOne(item => item.SymbolInfo);

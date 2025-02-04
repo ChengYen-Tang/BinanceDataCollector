@@ -5,6 +5,7 @@ using CollectorModels;
 using CollectorModels.Models;
 using CollectorModels.Models.Csv;
 using CollectorModels.ShardingCore;
+using CryptoExchange.Net.Converters.JsonNet;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -70,7 +71,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         Kline[] klines = await db.FuturesCoinBinanceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new Kline
         {
-            OpenTime = item.OpenTime,
+            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
             OpenPrice = item.OpenPrice,
             HighPrice = item.HighPrice,
             LowPrice = item.LowPrice,
@@ -80,7 +81,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
             TakerBuyBaseVolume = item.TakerBuyBaseVolume,
             TakerBuyQuoteVolume = item.TakerBuyQuoteVolume,
             TradeCount = item.TradeCount,
-            CloseTime = item.CloseTime
+            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
         }).ToArrayAsync(ct);
         if (klines.Length == 0)
             return Result.Fail("No klines found.");
@@ -175,12 +176,12 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         PremiumIndexKline[] klines = await db.FuturesCoinBinancePremiumIndexKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new PremiumIndexKline
         {
-            OpenTime = item.OpenTime,
+            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
             OpenPrice = item.OpenPrice,
             HighPrice = item.HighPrice,
             LowPrice = item.LowPrice,
             ClosePrice = item.ClosePrice,
-            CloseTime = item.CloseTime
+            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
         }).ToArrayAsync(ct);
         if (klines.Length == 0)
             return Result.Fail("No klines found.");

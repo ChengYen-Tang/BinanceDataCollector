@@ -79,7 +79,7 @@ public class BinanceSymbolInfo
     /// <summary>
     /// Permissions types
     /// </summary>
-    public IEnumerable<AccountType> Permissions { get; set; }
+    public IEnumerable<PermissionType> Permissions { get; set; }
 
     public List<SpotBinanceKline> BinanceKlines { get; set; }
 
