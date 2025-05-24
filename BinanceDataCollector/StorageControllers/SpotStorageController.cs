@@ -5,7 +5,7 @@ using CollectorModels;
 using CollectorModels.Models;
 using CollectorModels.Models.Csv;
 using CollectorModels.ShardingCore;
-using CryptoExchange.Net.Converters.JsonNet;
+using CryptoExchange.Net.Converters.SystemTextJson;
 using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;

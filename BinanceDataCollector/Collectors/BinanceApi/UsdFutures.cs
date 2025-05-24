@@ -12,7 +12,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         List<IBinanceKline> klines = [];
         while (startTime < endTime)
         {
-            WebCallResult<IEnumerable<IBinanceKline>> result;
+            WebCallResult<IBinanceKline[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
@@ -23,7 +23,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Any() ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -35,7 +35,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
-            WebCallResult<IEnumerable<BinanceMarkIndexKline>> result;
+            WebCallResult<BinanceMarkIndexKline[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
@@ -46,7 +46,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Any() ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);

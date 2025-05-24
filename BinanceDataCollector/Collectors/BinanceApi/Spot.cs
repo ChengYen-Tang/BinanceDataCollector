@@ -11,7 +11,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             List<IBinanceKline> klines = [];
             while (startTime < endTime)
             {
-                WebCallResult<IEnumerable<IBinanceKline>> result;
+                WebCallResult<IBinanceKline[]> result;
                 try
                 {
                     result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
@@ -22,7 +22,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                 }
                 if (!result.Success)
                     return Result.Fail(result.Error!.Message);
-                if (!result.Data!.Any())
+                if (result.Data!.Length == 0)
                     break;
                 startTime = result.Data.Last().CloseTime;
                 klines.AddRange(result.Data);
