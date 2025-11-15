@@ -28,14 +28,34 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        foreach (BinanceSymbolInfo symbol in await db.BinanceSymbolInfos.AsNoTracking().ToArrayAsync(ct))
+        
+        // 只取得 symbol 名稱，不載入完整的 entity
+        List<string> symbolNames = await db.BinanceSymbolInfos
+            .AsNoTracking()
+            .Select(s => s.Name)
+            .ToListAsync(ct);
+
+        foreach (string symbolName in symbolNames)
         {
-            SpotBinanceKline[] klines = await db.SpotBinanceKlines.AsNoTracking().Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbol.Name).ToArrayAsync(ct);
+            // 只查詢必要欄位：Id 和 SymbolInfoId (Sharding Key)
+            var klineMinimalData = await db.SpotBinanceKlines
+                .AsNoTracking()
+                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
+            // 轉換為只包含必要欄位的 entity
+            SpotBinanceKline[] klines = [.. klineMinimalData.Select(x => new SpotBinanceKline
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             Dictionary<DbContext, IEnumerable<SpotBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
             foreach (KeyValuePair<DbContext, IEnumerable<SpotBinanceKline>> item in bulkShardingEnumerable)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            transaction.Commit();
+            await transaction.CommitAsync(ct);
         }
     }
 
