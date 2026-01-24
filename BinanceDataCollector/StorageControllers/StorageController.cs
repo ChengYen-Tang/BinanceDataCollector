@@ -96,10 +96,8 @@ internal abstract class StorageController<T, T1, T2>
 
         if (Directory.Exists(KlinePath))
             Directory.Delete(KlinePath, true);
-        if (Directory.Exists(PremiumIndexKlinePath))
-            Directory.Delete(PremiumIndexKlinePath, true);
         Directory.CreateDirectory(KlinePath);
-        Directory.CreateDirectory(PremiumIndexKlinePath);
+        
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -113,7 +111,17 @@ internal abstract class StorageController<T, T1, T2>
             string path = Path.Combine(KlinePath, $"{symbol}.csv");
             CsvExporter exporter = new();
             await exporter.Export(path, klinesResult.Value);
+        });
 
+        if (!IsFutures)
+            return;
+
+        if (Directory.Exists(PremiumIndexKlinePath))
+            Directory.Delete(PremiumIndexKlinePath, true);
+        Directory.CreateDirectory(PremiumIndexKlinePath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
             Result<PremiumIndexKline[]> premiumIndexKlinesResult = await GetCsvPremiumIndexKlinesAsync(symbol, ct);
             if (premiumIndexKlinesResult.IsFailed)
             {
@@ -122,6 +130,7 @@ internal abstract class StorageController<T, T1, T2>
             }
 
             string premiumIndexPath = Path.Combine(PremiumIndexKlinePath, $"{symbol}.csv");
+            CsvExporter exporter = new();
             await exporter.Export(premiumIndexPath, premiumIndexKlinesResult.Value);
         });
     }
