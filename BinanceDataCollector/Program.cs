@@ -47,6 +47,8 @@ IHost host = Host.CreateDefaultBuilder(args)
                     op.AddShardingTableRoute<SpotBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtBinancePremiumIndexKlineTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtFundingRateTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinFundingRateTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinancePremiumIndexKlineTableRoute>();
                 }).UseConfig(op =>

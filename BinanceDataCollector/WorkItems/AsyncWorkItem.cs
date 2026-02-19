@@ -25,6 +25,20 @@ internal class AsyncWorkItem<T> : IAsymcWorkItem
         => func(parameter, ct);
 }
 
+internal class AsyncWorkItem<T, T1> : IAsymcWorkItem
+{
+    private readonly Func<T, T1, CancellationToken, Task> func;
+    private readonly T parameter;
+    private readonly T1 parameter1;
+    private readonly CancellationToken ct;
+
+    public AsyncWorkItem(Func<T, T1, CancellationToken, Task> func, T parameter, T1 parameter1, CancellationToken ct)
+        => (this.func, this.parameter, this.parameter1, this.ct) = (func, parameter, parameter1, ct);
+
+    public Task Run()
+        => func(parameter, parameter1, ct);
+}
+
 internal class AsyncWorkItem<T, T1, T2> : IAsymcWorkItem
 {
     private readonly Func<T, T1, T2, CancellationToken, Task> func;

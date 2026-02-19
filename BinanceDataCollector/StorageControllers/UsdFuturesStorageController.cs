@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline>
+internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtFundingRate>
 {
     private readonly UsdFutures usdFutures;
 
@@ -21,14 +21,15 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "UsdFutures"); } }
     protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, "UsdFutures"); } }
+    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, "UsdFutures"); } }
     protected override bool IsFutures => true;
 
-    public override async Task DeleteOldKlines(CancellationToken ct = default)
+    public override async Task DeleteOldData(CancellationToken ct = default)
     {
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        
+
         // 只取得 symbol 名稱，不載入完整的 entity
         List<string> symbolNames = await db.BinanceFuturesUsdtSymbolInfos
             .AsNoTracking()
@@ -50,6 +51,12 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
                 .Select(item => new { item.Id, item.SymbolInfoId })
                 .ToArrayAsync(ct);
 
+            var fundingRateMinimalData = await db.FuturesUsdtFundingRates
+                .AsNoTracking()
+                .Where(item => item.FundingTime < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
             // 轉換為只包含必要欄位的 entity
             FuturesUsdtBinanceKline[] klines = [.. klineMinimalData.Select(x => new FuturesUsdtBinanceKline
             {
@@ -63,12 +70,21 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
                 SymbolInfoId = x.SymbolInfoId
             })];
 
+            FuturesUsdtFundingRate[] fundingRates = [.. fundingRateMinimalData.Select(x => new FuturesUsdtFundingRate
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinancePremiumIndexKline>> bulkShardingEnumerablePremiumIndex = db.BulkShardingTableEnumerable(premiumIndexKlines);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtFundingRate>> bulkShardingEnumerableFundingRates = db.BulkShardingTableEnumerable(fundingRates);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinanceKline>> item in bulkShardingEnumerable)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinancePremiumIndexKline>> item in bulkShardingEnumerablePremiumIndex)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtFundingRate>> item in bulkShardingEnumerableFundingRates)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             await transaction.CommitAsync(ct);
         }
@@ -81,6 +97,16 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         return (await db.FuturesUsdtBinanceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
             ? await db.FuturesUsdtBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
+            : yearsReserved;
+    }
+
+    public override async Task<DateTime> GetLastPremiumIndexTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
     }
 
@@ -217,4 +243,52 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
             return Result.Fail("No klines found.");
         return Result.Ok(klines);
     }
+
+    public override async Task<DateTime> GetLastFundingTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        string symbolName = symbol.Name;
+        return (await db.FuturesUsdtFundingRates.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbolName, ct))
+            ? await db.FuturesUsdtFundingRates.AsNoTracking().Where(item => item.SymbolInfoId == symbolName).MaxAsync(item => item.FundingTime, ct)
+            : yearsReserved;
+    }
+
+    protected override async Task<Result<List<FuturesUsdtFundingRate>>> GetFundingRatesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        string symbolName = symbol.Name;
+        Result<List<BinanceFuturesFundingRateHistory>> result = await usdFutures.GetFundingRatesAsync(symbolName, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+
+        return Result.Ok(result.Value.AsParallel().Select(rate => new FuturesUsdtFundingRate
+        {
+            FundingRate = decimal.ToDouble(rate.FundingRate),
+            FundingTime = rate.FundingTime,
+            MarkPrice = rate.MarkPrice.HasValue ? decimal.ToDouble(rate.MarkPrice.Value) : null,
+            SymbolInfoId = symbolName,
+            Id = CombineFundingRateId(symbolName, rate.FundingTime)
+        }).ToList());
+    }
+
+    protected override async Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        FundingRate[] rates = await db.FuturesUsdtFundingRates.AsNoTracking()
+            .Where(item => item.SymbolInfoId == symbol)
+            .OrderBy(item => item.FundingTime)
+            .Select(item => new FundingRate
+            {
+                FundingTime = DateTimeConverter.ConvertToMilliseconds(item.FundingTime).Value,
+                Rate = item.FundingRate,
+                MarkPrice = item.MarkPrice
+            }).ToArrayAsync(ct);
+        if (rates.Length == 0)
+            return Result.Fail("No funding rates found.");
+        return Result.Ok(rates);
+    }
+
 }

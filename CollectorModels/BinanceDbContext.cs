@@ -101,6 +101,9 @@ namespace CollectorModels
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
                 .HasMany(item => item.BinancePremiumIndexKlines)
                 .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.FundingRates)
+                .WithOne(item => item.SymbolInfo);
             #endregion
 
             #region SpotBinanceKline
@@ -133,6 +136,13 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesUsdtFundingRate
+            modelBuilder.Entity<FuturesUsdtFundingRate>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.FundingRates)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
             #region FuturesCoinBinanceKline
             modelBuilder.Entity<FuturesCoinBinanceKline>()
                 .Property(e => e.Interval)
@@ -153,6 +163,13 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesCoinFundingRate
+            modelBuilder.Entity<FuturesCoinFundingRate>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.FundingRates)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
         }
 
         public virtual DbSet<BinanceSymbolInfo> BinanceSymbolInfos { get; set; }
@@ -161,8 +178,10 @@ namespace CollectorModels
         public virtual DbSet<SpotBinanceKline> SpotBinanceKlines { get; set; }
         public virtual DbSet<FuturesUsdtBinanceKline> FuturesUsdtBinanceKlines { get; set; }
         public virtual DbSet<FuturesUsdtBinancePremiumIndexKline> FuturesUsdtBinancePremiumIndexKlines { get; set; }
+        public virtual DbSet<FuturesUsdtFundingRate> FuturesUsdtFundingRates { get; set; }
         public virtual DbSet<FuturesCoinBinanceKline> FuturesCoinBinanceKlines { get; set; }
         public virtual DbSet<FuturesCoinBinancePremiumIndexKline> FuturesCoinBinancePremiumIndexKlines { get; set; }
+        public virtual DbSet<FuturesCoinFundingRate> FuturesCoinFundingRates { get; set; }
 
         public IRouteTail RouteTail { get; set; }
     }

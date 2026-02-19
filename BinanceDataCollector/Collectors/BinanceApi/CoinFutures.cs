@@ -67,4 +67,36 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             return Result.Fail(result.Error!.Message);
         return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Any(ic => x.Name.Contains(ic) && !x.Name.Contains("1000") && !x.Name.Contains('_')) && x.UnderlyingType == UnderlyingType.Coin && x.ContractType == ContractType.Perpetual && x.Status == SymbolStatus.Trading));
     }
+
+    public async Task<Result<List<BinanceFuturesFundingRateHistory>>> GetFundingRatesAsync(string symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        DateTime endTime = DateTime.UtcNow;
+        List<BinanceFuturesFundingRateHistory> fundingRates = [];
+        while (startTime < endTime)
+        {
+            WebCallResult<BinanceFuturesFundingRateHistory[]> result;
+            try
+            {
+                result = await base.client.CoinFuturesApi.ExchangeData.GetFundingRatesAsync(symbol, startTime, endTime, 499, ct);
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail(ex.Message);
+            }
+            if (!result.Success)
+                return Result.Fail(result.Error!.Message);
+            if (result.Data.Length == 0)
+            {
+                startTime = startTime.AddDays(200);
+                continue;
+            }
+
+            fundingRates.AddRange(result.Data);
+            DateTime lastFundingTime = result.Data.Last().FundingTime;
+            if (lastFundingTime <= startTime)
+                break;
+            startTime = lastFundingTime.AddMilliseconds(1);
+        }
+        return Result.Ok(fundingRates);
+    }
 }

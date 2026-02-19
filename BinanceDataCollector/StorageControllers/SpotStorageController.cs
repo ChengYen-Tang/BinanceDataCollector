@@ -1,6 +1,7 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Spot;
 using BinanceDataCollector.Collectors.BinanceApi;
+using BinanceDataCollector.WorkItems;
 using CollectorModels;
 using CollectorModels.Models;
 using CollectorModels.Models.Csv;
@@ -12,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, BinanceKline?>
+internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, BinanceKline?, FuturesFundingRate>
 {
     private readonly Spot spot;
 
@@ -21,9 +22,10 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "Spot"); } }
     protected override string PremiumIndexKlinePath => throw new NotImplementedException();
+    protected override string FundingRatePath => throw new NotSupportedException("Spot market does not support funding rates.");
     protected override bool IsFutures => false;
 
-    public override async Task DeleteOldKlines(CancellationToken ct = default)
+    public override async Task DeleteOldData(CancellationToken ct = default)
     {
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
@@ -68,6 +70,12 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
             ? await db.SpotBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
     }
+
+    public override Task<DateTime> GetLastPremiumIndexTimeAsync(BinanceSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support premium index klines.");
+
+    public override Task<DateTime> GetLastFundingTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support funding rates.");
 
     protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
     {
@@ -132,6 +140,9 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override Task<Result<List<BinanceKline?>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();
 
+    protected override Task<Result<List<FuturesFundingRate>>> GetFundingRatesAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support funding rates.");
+
     protected override async Task<Result<List<BinanceSymbolInfo>>> GetMarketAsync(CancellationToken ct = default)
     {
         Result<IEnumerable<BinanceSymbol>> result = await spot.GetMarketAsync(ct);
@@ -163,4 +174,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
     protected override Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default)
         => throw new NotImplementedException();
+
+    protected override Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support funding rates.");
 }
