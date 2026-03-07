@@ -1,17 +1,18 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Spot;
+using ApiKline = Binance.Net.Interfaces.IBinanceKline;
 
 namespace BinanceDataCollector.Collectors.BinanceApi
 {
     internal class Spot(IBinanceRestClient client, string[] ignoneCoins) : BaseTrade<BinanceSymbol>(client)
     {
-        public override async Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         {
             DateTime endTime = DateTime.Today;
-            List<IBinanceKline> klines = [];
+            List<ApiKline> klines = [];
             while (startTime < endTime)
             {
-                WebCallResult<IBinanceKline[]> result;
+                WebCallResult<ApiKline[]> result;
                 try
                 {
                     result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
@@ -30,7 +31,13 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             return Result.Ok(klines);
         }
 
-        public override Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        public override Task<Result<List<ApiKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public override Task<Result<List<ApiKline>>> GetIndexPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public override Task<Result<List<ApiKline>>> GetMarkPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
             => throw new NotImplementedException();
 
         public override async Task<Result<IEnumerable<BinanceSymbol>>> GetMarketAsync(CancellationToken ct = default)

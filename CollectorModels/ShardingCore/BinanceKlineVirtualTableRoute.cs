@@ -135,10 +135,26 @@ public class FuturesUsdtBinancePremiumIndexKlineTableRoute(IShardingTableCreator
 {
 }
 
+public class FuturesUsdtBinanceIndexPriceKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesUsdtBinanceIndexPriceKline>(tableCreator, virtualDataSource)
+{
+}
+
+public class FuturesUsdtBinanceMarkPriceKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesUsdtBinanceMarkPriceKline>(tableCreator, virtualDataSource)
+{
+}
+
 public class FuturesCoinBinanceKlineVirtualTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesCoinBinanceKline>(tableCreator, virtualDataSource)
 {
 }
 
 public class FuturesCoinBinancePremiumIndexKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesCoinBinancePremiumIndexKline>(tableCreator, virtualDataSource)
+{
+}
+
+public class FuturesCoinBinanceIndexPriceKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesCoinBinanceIndexPriceKline>(tableCreator, virtualDataSource)
+{
+}
+
+public class FuturesCoinBinanceMarkPriceKlineTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource) : BinanceKlineVirtualTableRoute<FuturesCoinBinanceMarkPriceKline>(tableCreator, virtualDataSource)
 {
 }

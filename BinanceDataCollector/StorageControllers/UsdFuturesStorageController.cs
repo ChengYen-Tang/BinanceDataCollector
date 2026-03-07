@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtFundingRate>
+internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate>
 {
     private readonly UsdFutures usdFutures;
 
@@ -21,6 +21,8 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "UsdFutures"); } }
     protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, "UsdFutures"); } }
+    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, "UsdFutures"); } }
+    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, "UsdFutures"); } }
     protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, "UsdFutures"); } }
     protected override bool IsFutures => true;
 
@@ -51,6 +53,18 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
                 .Select(item => new { item.Id, item.SymbolInfoId })
                 .ToArrayAsync(ct);
 
+            var indexPriceMinimalData = await db.FuturesUsdtBinanceIndexPriceKlines
+                .AsNoTracking()
+                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
+            var markPriceMinimalData = await db.FuturesUsdtBinanceMarkPriceKlines
+                .AsNoTracking()
+                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
             var fundingRateMinimalData = await db.FuturesUsdtFundingRates
                 .AsNoTracking()
                 .Where(item => item.FundingTime < yearsReserved && item.SymbolInfoId == symbolName)
@@ -70,6 +84,18 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
                 SymbolInfoId = x.SymbolInfoId
             })];
 
+            FuturesUsdtBinanceIndexPriceKline[] indexPriceKlines = [.. indexPriceMinimalData.Select(x => new FuturesUsdtBinanceIndexPriceKline
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
+            FuturesUsdtBinanceMarkPriceKline[] markPriceKlines = [.. markPriceMinimalData.Select(x => new FuturesUsdtBinanceMarkPriceKline
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
             FuturesUsdtFundingRate[] fundingRates = [.. fundingRateMinimalData.Select(x => new FuturesUsdtFundingRate
             {
                 Id = x.Id,
@@ -79,10 +105,16 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinancePremiumIndexKline>> bulkShardingEnumerablePremiumIndex = db.BulkShardingTableEnumerable(premiumIndexKlines);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceIndexPriceKline>> bulkShardingEnumerableIndexPrice = db.BulkShardingTableEnumerable(indexPriceKlines);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceMarkPriceKline>> bulkShardingEnumerableMarkPrice = db.BulkShardingTableEnumerable(markPriceKlines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtFundingRate>> bulkShardingEnumerableFundingRates = db.BulkShardingTableEnumerable(fundingRates);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinanceKline>> item in bulkShardingEnumerable)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinancePremiumIndexKline>> item in bulkShardingEnumerablePremiumIndex)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinanceIndexPriceKline>> item in bulkShardingEnumerableIndexPrice)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinanceMarkPriceKline>> item in bulkShardingEnumerableMarkPrice)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtFundingRate>> item in bulkShardingEnumerableFundingRates)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
@@ -107,6 +139,26 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         return (await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
             ? await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
+            : yearsReserved;
+    }
+
+    public override async Task<DateTime> GetLastIndexPriceTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtBinanceIndexPriceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtBinanceIndexPriceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
+            : yearsReserved;
+    }
+
+    public override async Task<DateTime> GetLastMarkPriceTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtBinanceMarkPriceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtBinanceMarkPriceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
             : yearsReserved;
     }
 
@@ -145,6 +197,44 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         return Result.Ok(klines);
     }
 
+    protected override async Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        PremiumIndexKline[] klines = await db.FuturesUsdtBinanceIndexPriceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new PremiumIndexKline
+        {
+            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
+            OpenPrice = item.OpenPrice,
+            HighPrice = item.HighPrice,
+            LowPrice = item.LowPrice,
+            ClosePrice = item.ClosePrice,
+            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
+        }).ToArrayAsync(ct);
+        if (klines.Length == 0)
+            return Result.Fail("No klines found.");
+        return Result.Ok(klines);
+    }
+
+    protected override async Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        PremiumIndexKline[] klines = await db.FuturesUsdtBinanceMarkPriceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new PremiumIndexKline
+        {
+            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
+            OpenPrice = item.OpenPrice,
+            HighPrice = item.HighPrice,
+            LowPrice = item.LowPrice,
+            ClosePrice = item.ClosePrice,
+            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
+        }).ToArrayAsync(ct);
+        if (klines.Length == 0)
+            return Result.Fail("No klines found.");
+        return Result.Ok(klines);
+    }
+
     protected override async Task<Result<List<FuturesUsdtBinanceKline>>> GetKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         Result<List<IBinanceKline>> result = await usdFutures.GetKlinesAsync(symbol.Name, interval, startTime, ct);
@@ -172,10 +262,50 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override async Task<Result<List<FuturesUsdtBinancePremiumIndexKline>>> GetPremiumIndexKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetPremiumIndexKlinesAsync(symbol.Name, interval, startTime, ct);
+        Result<List<IBinanceKline>> result = await usdFutures.GetPremiumIndexKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
         return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinancePremiumIndexKline()
+        {
+            OpenPrice = decimal.ToDouble(kline.OpenPrice),
+            ClosePrice = decimal.ToDouble(kline.ClosePrice),
+            HighPrice = decimal.ToDouble(kline.HighPrice),
+            LowPrice = decimal.ToDouble(kline.LowPrice),
+            Interval = interval,
+            OpenTime = kline.OpenTime,
+            CloseTime = kline.CloseTime,
+            SymbolInfo = symbol,
+            SymbolInfoId = symbol.Name,
+            Id = CombineKlineId(symbol.Name, interval, kline.CloseTime)
+        }).ToList());
+    }
+
+    protected override async Task<Result<List<FuturesUsdtBinanceIndexPriceKline>>> GetIndexPriceKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        Result<List<IBinanceKline>> result = await usdFutures.GetIndexPriceKlinesAsync(symbol.Name, interval, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+        return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceIndexPriceKline()
+        {
+            OpenPrice = decimal.ToDouble(kline.OpenPrice),
+            ClosePrice = decimal.ToDouble(kline.ClosePrice),
+            HighPrice = decimal.ToDouble(kline.HighPrice),
+            LowPrice = decimal.ToDouble(kline.LowPrice),
+            Interval = interval,
+            OpenTime = kline.OpenTime,
+            CloseTime = kline.CloseTime,
+            SymbolInfo = symbol,
+            SymbolInfoId = symbol.Name,
+            Id = CombineKlineId(symbol.Name, interval, kline.CloseTime)
+        }).ToList());
+    }
+
+    protected override async Task<Result<List<FuturesUsdtBinanceMarkPriceKline>>> GetMarkPriceKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        Result<List<IBinanceKline>> result = await usdFutures.GetMarkPriceKlinesAsync(symbol.Name, interval, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+        return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceMarkPriceKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),

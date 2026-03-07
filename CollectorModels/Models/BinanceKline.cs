@@ -108,6 +108,26 @@ public class FuturesUsdtBinancePremiumIndexKline : BinanceMarkIndexKline
 [Index(nameof(Interval))]
 [Index(nameof(CloseTime), nameof(Interval))]
 [Index(nameof(OpenTime), nameof(Interval))]
+public class FuturesUsdtBinanceIndexPriceKline : BinanceMarkIndexKline
+{
+    public BinanceFuturesUsdtSymbolInfo SymbolInfo { get; set; }
+}
+
+[Index(nameof(CloseTime))]
+[Index(nameof(OpenTime))]
+[Index(nameof(Interval))]
+[Index(nameof(CloseTime), nameof(Interval))]
+[Index(nameof(OpenTime), nameof(Interval))]
+public class FuturesUsdtBinanceMarkPriceKline : BinanceMarkIndexKline
+{
+    public BinanceFuturesUsdtSymbolInfo SymbolInfo { get; set; }
+}
+
+[Index(nameof(CloseTime))]
+[Index(nameof(OpenTime))]
+[Index(nameof(Interval))]
+[Index(nameof(CloseTime), nameof(Interval))]
+[Index(nameof(OpenTime), nameof(Interval))]
 public class FuturesCoinBinanceKline : BinanceKline
 {
     public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
@@ -119,6 +139,26 @@ public class FuturesCoinBinanceKline : BinanceKline
 [Index(nameof(CloseTime), nameof(Interval))]
 [Index(nameof(OpenTime), nameof(Interval))]
 public class FuturesCoinBinancePremiumIndexKline : BinanceMarkIndexKline
+{
+    public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
+}
+
+[Index(nameof(CloseTime))]
+[Index(nameof(OpenTime))]
+[Index(nameof(Interval))]
+[Index(nameof(CloseTime), nameof(Interval))]
+[Index(nameof(OpenTime), nameof(Interval))]
+public class FuturesCoinBinanceIndexPriceKline : BinanceMarkIndexKline
+{
+    public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
+}
+
+[Index(nameof(CloseTime))]
+[Index(nameof(OpenTime))]
+[Index(nameof(Interval))]
+[Index(nameof(CloseTime), nameof(Interval))]
+[Index(nameof(OpenTime), nameof(Interval))]
+public class FuturesCoinBinanceMarkPriceKline : BinanceMarkIndexKline
 {
     public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
 }

@@ -72,6 +72,12 @@ namespace CollectorModels
             modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
                 .HasMany(item => item.BinancePremiumIndexKlines)
                 .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.BinanceIndexPriceKlines)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.BinanceMarkPriceKlines)
+                .WithOne(item => item.SymbolInfo);
             #endregion
             #region BinanceFuturesUsdtSymbolInfo
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
@@ -100,6 +106,12 @@ namespace CollectorModels
                 .WithOne(item => item.SymbolInfo);
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
                 .HasMany(item => item.BinancePremiumIndexKlines)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.BinanceIndexPriceKlines)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.BinanceMarkPriceKlines)
                 .WithOne(item => item.SymbolInfo);
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
                 .HasMany(item => item.FundingRates)
@@ -136,6 +148,26 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesUsdtBinanceIndexPriceKline
+            modelBuilder.Entity<FuturesUsdtBinanceIndexPriceKline>()
+                .Property(e => e.Interval)
+                .HasConversion<string>();
+            modelBuilder.Entity<FuturesUsdtBinanceIndexPriceKline>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.BinanceIndexPriceKlines)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesUsdtBinanceMarkPriceKline
+            modelBuilder.Entity<FuturesUsdtBinanceMarkPriceKline>()
+                .Property(e => e.Interval)
+                .HasConversion<string>();
+            modelBuilder.Entity<FuturesUsdtBinanceMarkPriceKline>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.BinanceMarkPriceKlines)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
             #region FuturesUsdtFundingRate
             modelBuilder.Entity<FuturesUsdtFundingRate>()
                 .HasOne(item => item.SymbolInfo)
@@ -163,6 +195,26 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesCoinBinanceIndexPriceKline
+            modelBuilder.Entity<FuturesCoinBinanceIndexPriceKline>()
+                .Property(e => e.Interval)
+                .HasConversion<string>();
+            modelBuilder.Entity<FuturesCoinBinanceIndexPriceKline>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.BinanceIndexPriceKlines)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesCoinBinanceMarkPriceKline
+            modelBuilder.Entity<FuturesCoinBinanceMarkPriceKline>()
+                .Property(e => e.Interval)
+                .HasConversion<string>();
+            modelBuilder.Entity<FuturesCoinBinanceMarkPriceKline>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.BinanceMarkPriceKlines)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
             #region FuturesCoinFundingRate
             modelBuilder.Entity<FuturesCoinFundingRate>()
                 .HasOne(item => item.SymbolInfo)
@@ -178,9 +230,13 @@ namespace CollectorModels
         public virtual DbSet<SpotBinanceKline> SpotBinanceKlines { get; set; }
         public virtual DbSet<FuturesUsdtBinanceKline> FuturesUsdtBinanceKlines { get; set; }
         public virtual DbSet<FuturesUsdtBinancePremiumIndexKline> FuturesUsdtBinancePremiumIndexKlines { get; set; }
+        public virtual DbSet<FuturesUsdtBinanceIndexPriceKline> FuturesUsdtBinanceIndexPriceKlines { get; set; }
+        public virtual DbSet<FuturesUsdtBinanceMarkPriceKline> FuturesUsdtBinanceMarkPriceKlines { get; set; }
         public virtual DbSet<FuturesUsdtFundingRate> FuturesUsdtFundingRates { get; set; }
         public virtual DbSet<FuturesCoinBinanceKline> FuturesCoinBinanceKlines { get; set; }
         public virtual DbSet<FuturesCoinBinancePremiumIndexKline> FuturesCoinBinancePremiumIndexKlines { get; set; }
+        public virtual DbSet<FuturesCoinBinanceIndexPriceKline> FuturesCoinBinanceIndexPriceKlines { get; set; }
+        public virtual DbSet<FuturesCoinBinanceMarkPriceKline> FuturesCoinBinanceMarkPriceKlines { get; set; }
         public virtual DbSet<FuturesCoinFundingRate> FuturesCoinFundingRates { get; set; }
 
         public IRouteTail RouteTail { get; set; }

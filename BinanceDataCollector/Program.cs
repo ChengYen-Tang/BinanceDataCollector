@@ -47,10 +47,14 @@ IHost host = Host.CreateDefaultBuilder(args)
                     op.AddShardingTableRoute<SpotBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtBinancePremiumIndexKlineTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtBinanceIndexPriceKlineTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtBinanceMarkPriceKlineTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtFundingRateTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinFundingRateTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinancePremiumIndexKlineTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinBinanceIndexPriceKlineTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinBinanceMarkPriceKlineTableRoute>();
                 }).UseConfig(op =>
                 {
                     op.ThrowIfQueryRouteNotMatch = false;

@@ -20,5 +20,7 @@ public class BinanceFuturesCoinSymbolInfo : BinanceFuturesSymbolInfo
 
     public List<FuturesCoinBinanceKline> BinanceKlines { get; set; }
     public List<FuturesCoinBinancePremiumIndexKline> BinancePremiumIndexKlines { get; set; }
+    public List<FuturesCoinBinanceIndexPriceKline> BinanceIndexPriceKlines { get; set; }
+    public List<FuturesCoinBinanceMarkPriceKline> BinanceMarkPriceKlines { get; set; }
     public List<FuturesCoinFundingRate> FundingRates { get; set; }
 }

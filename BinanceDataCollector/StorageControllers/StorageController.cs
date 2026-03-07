@@ -10,11 +10,13 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal abstract class StorageController<T, T1, T2, T3>
+internal abstract class StorageController<T, T1, T2, T3, T4, T5>
     where T : class
     where T1 : BinanceKline
-    where T2 : BinanceMarkIndexKline?
-    where T3 : FuturesFundingRate
+    where T2 : BinanceMarkIndexKline
+    where T3 : BinanceMarkIndexKline
+    where T4 : BinanceMarkIndexKline
+    where T5 : FuturesFundingRate
 {
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
@@ -23,9 +25,13 @@ internal abstract class StorageController<T, T1, T2, T3>
     protected static string DataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
     protected static string RootKlinePath = Path.Combine(DataPath, "Kline");
     protected static string RootPremiumIndexKlinePath = Path.Combine(DataPath, "PremiumIndexKline");
+    protected static string RootIndexPriceKlinePath = Path.Combine(DataPath, "IndexPriceKline");
+    protected static string RootMarkPriceKlinePath = Path.Combine(DataPath, "MarkPriceKline");
     protected static string RootFundingRatePath = Path.Combine(DataPath, "FundingRate");
     protected abstract string KlinePath { get; }
     protected abstract string PremiumIndexKlinePath { get; }
+    protected abstract string IndexPriceKlinePath { get; }
+    protected abstract string MarkPriceKlinePath { get; }
     protected abstract string FundingRatePath { get; }
     protected abstract bool IsFutures { get; }
 
@@ -72,6 +78,38 @@ internal abstract class StorageController<T, T1, T2, T3>
         return new(InsertKlinesAsync, result.Value, ct);
     }
 
+    public async Task<AsyncWorkItem<IList<T3>>> UpdateIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug($"Start getting {typeof(T3).Name} IndexPrice {symbol} {interval} {startTime}...");
+        Result<List<T3>> result = await GetIndexPriceKlinesAsync(symbol, interval, startTime, ct);
+        logger.LogDebug("Finish getting.");
+        if (result.IsFailed)
+        {
+            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new(InsertKlinesAsync, [], ct);
+        }
+
+        return new(InsertKlinesAsync, result.Value, ct);
+    }
+
+    public async Task<AsyncWorkItem<IList<T4>>> UpdateMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug($"Start getting {typeof(T4).Name} MarkPrice {symbol} {interval} {startTime}...");
+        Result<List<T4>> result = await GetMarkPriceKlinesAsync(symbol, interval, startTime, ct);
+        logger.LogDebug("Finish getting.");
+        if (result.IsFailed)
+        {
+            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new(InsertKlinesAsync, [], ct);
+        }
+
+        return new(InsertKlinesAsync, result.Value, ct);
+    }
+
     public async Task<AsyncWorkItem<IList<T2>>> UpdatePremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         logger.LogDebug($"Start getting {typeof(T2).Name} {symbol} {interval} {startTime}...");
@@ -88,20 +126,20 @@ internal abstract class StorageController<T, T1, T2, T3>
         return new(InsertKlinesAsync, result.Value, ct);
     }
 
-    public async Task<AsyncWorkItem<IList<T3>>> UpdateFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    public async Task<AsyncWorkItem<IList<T5>>> UpdateFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T3).Name} {symbol} {startTime}...");
-        Result<List<T3>> result = await GetFundingRatesAsync(symbol, startTime, ct);
+        logger.LogDebug($"Start getting {typeof(T5).Name} {symbol} {startTime}...");
+        Result<List<T5>> result = await GetFundingRatesAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting.");
         if (result.IsFailed)
         {
             logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<IList<T3>>(InsertFundingRatesAsync, [], ct);
+            return new AsyncWorkItem<IList<T5>>(InsertFundingRatesAsync, [], ct);
         }
 
-        return new AsyncWorkItem<IList<T3>>(InsertFundingRatesAsync, result.Value, ct);
+        return new AsyncWorkItem<IList<T5>>(InsertFundingRatesAsync, result.Value, ct);
     }
 
     public async Task ExportToCsvAsync(CancellationToken ct = default)
@@ -153,6 +191,42 @@ internal abstract class StorageController<T, T1, T2, T3>
             await exporter.Export(premiumIndexPath, premiumIndexKlinesResult.Value);
         });
 
+        if (Directory.Exists(IndexPriceKlinePath))
+            Directory.Delete(IndexPriceKlinePath, true);
+        Directory.CreateDirectory(IndexPriceKlinePath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<PremiumIndexKline[]> indexPriceKlinesResult = await GetCsvIndexPriceKlinesAsync(symbol, ct);
+            if (indexPriceKlinesResult.IsFailed)
+            {
+                logger.LogError(indexPriceKlinesResult.Errors[0].Message);
+                return;
+            }
+
+            string indexPricePath = Path.Combine(IndexPriceKlinePath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(indexPricePath, indexPriceKlinesResult.Value);
+        });
+
+        if (Directory.Exists(MarkPriceKlinePath))
+            Directory.Delete(MarkPriceKlinePath, true);
+        Directory.CreateDirectory(MarkPriceKlinePath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<PremiumIndexKline[]> markPriceKlinesResult = await GetCsvMarkPriceKlinesAsync(symbol, ct);
+            if (markPriceKlinesResult.IsFailed)
+            {
+                logger.LogError(markPriceKlinesResult.Errors[0].Message);
+                return;
+            }
+
+            string markPricePath = Path.Combine(MarkPriceKlinePath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(markPricePath, markPriceKlinesResult.Value);
+        });
+
         if (Directory.Exists(FundingRatePath))
             Directory.Delete(FundingRatePath, true);
         Directory.CreateDirectory(FundingRatePath);
@@ -196,7 +270,7 @@ internal abstract class StorageController<T, T1, T2, T3>
         }
     }
 
-    protected async Task InsertFundingRatesAsync(IList<T3> rates, CancellationToken ct = default)
+    protected async Task InsertFundingRatesAsync(IList<T5> rates, CancellationToken ct = default)
     {
         if (!rates.Any())
             return;
@@ -205,10 +279,10 @@ internal abstract class StorageController<T, T1, T2, T3>
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(T3).Name} Count: {rates.Count}...");
-            Dictionary<DbContext, IEnumerable<T3>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(rates);
+            logger.LogDebug($"Start inserting {typeof(T5).Name} Count: {rates.Count}...");
+            Dictionary<DbContext, IEnumerable<T5>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(rates);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
-            foreach (KeyValuePair<DbContext, IEnumerable<T3>> item in bulkShardingEnumerable)
+            foreach (KeyValuePair<DbContext, IEnumerable<T5>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             transaction.Commit();
             logger.LogDebug("Finish inserting.");
@@ -221,6 +295,10 @@ internal abstract class StorageController<T, T1, T2, T3>
 
     public abstract Task<DateTime> GetLastTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastPremiumIndexTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
+    public virtual Task<DateTime> GetLastIndexPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default)
+        => Task.FromResult(yearsReserved);
+    public virtual Task<DateTime> GetLastMarkPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default)
+        => Task.FromResult(yearsReserved);
     public abstract Task<DateTime> GetLastFundingTimeAsync(T symbol, CancellationToken ct = default);
 
     public abstract Task DeleteOldData(CancellationToken ct = default);
@@ -229,13 +307,21 @@ internal abstract class StorageController<T, T1, T2, T3>
 
     protected abstract Task<Result<List<T1>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T2>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<T3>>> GetFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected virtual Task<Result<List<T3>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        => Task.FromResult(Result.Fail<List<T3>>("Not supported."));
+    protected virtual Task<Result<List<T4>>> GetMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        => Task.FromResult(Result.Fail<List<T4>>("Not supported."));
+    protected abstract Task<Result<List<T5>>> GetFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected abstract Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default);
 
     protected abstract Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default);
 
     protected abstract Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default);
+    protected virtual Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default)
+        => Task.FromResult(Result.Fail<PremiumIndexKline[]>("Not supported."));
+    protected virtual Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default)
+        => Task.FromResult(Result.Fail<PremiumIndexKline[]>("Not supported."));
     protected abstract Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default);
 
     protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)

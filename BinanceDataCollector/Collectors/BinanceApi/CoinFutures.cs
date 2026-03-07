@@ -1,18 +1,19 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Futures;
 using Binance.Net.Objects.Models.Spot;
+using ApiKline = Binance.Net.Interfaces.IBinanceKline;
 
 namespace BinanceDataCollector.Collectors.BinanceApi;
 
 internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : BaseTrade<BinanceFuturesCoinSymbol>(client)
 {
-    public override async Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         DateTime endTime = DateTime.Today;
-        List<IBinanceKline> klines = [];
+        List<ApiKline> klines = [];
         while (startTime < endTime)
         {
-            WebCallResult<IBinanceKline[]> result;
+            WebCallResult<ApiKline[]> result;
             try
             {
                 result = await base.client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
@@ -29,10 +30,56 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
         return Result.Ok(klines);
     }
 
-    public override async Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    public override async Task<Result<List<ApiKline>>> GetIndexPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         DateTime endTime = DateTime.Today;
-        List<BinanceMarkIndexKline> klines = [];
+        List<ApiKline> klines = [];
+        while (startTime < endTime)
+        {
+            WebCallResult<BinanceMarkIndexKline[]> result;
+            try
+            {
+                result = await base.client.CoinFuturesApi.ExchangeData.GetIndexPriceKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail(ex.Message);
+            }
+            if (!result.Success)
+                return Result.Fail(result.Error!.Message);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            klines.AddRange(result.Data.Select(x => (ApiKline)x));
+        }
+        return Result.Ok(klines);
+    }
+
+    public override async Task<Result<List<ApiKline>>> GetMarkPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        DateTime endTime = DateTime.Today;
+        List<ApiKline> klines = [];
+        while (startTime < endTime)
+        {
+            WebCallResult<BinanceMarkIndexKline[]> result;
+            try
+            {
+                result = await base.client.CoinFuturesApi.ExchangeData.GetMarkPriceKlinesAsync(symbol, interval, 1500, startTime, endTime, ct);
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail(ex.Message);
+            }
+            if (!result.Success)
+                return Result.Fail(result.Error!.Message);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            klines.AddRange(result.Data.Select(x => (ApiKline)x));
+        }
+        return Result.Ok(klines);
+    }
+
+    public override async Task<Result<List<ApiKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    {
+        DateTime endTime = DateTime.Today;
+        List<ApiKline> klines = [];
         while (startTime < endTime)
         {
             WebCallResult<BinanceMarkIndexKline[]> result;
@@ -47,7 +94,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
-            klines.AddRange(result.Data);
+            klines.AddRange(result.Data.Select(x => (ApiKline)x));
         }
         return Result.Ok(klines);
     }

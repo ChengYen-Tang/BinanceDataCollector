@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, BinanceKline?, FuturesFundingRate>
+internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, FuturesFundingRate>
 {
     private readonly Spot spot;
 
@@ -22,6 +22,8 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "Spot"); } }
     protected override string PremiumIndexKlinePath => throw new NotImplementedException();
+    protected override string IndexPriceKlinePath => throw new NotSupportedException("Spot market does not support index price klines.");
+    protected override string MarkPriceKlinePath => throw new NotSupportedException("Spot market does not support mark price klines.");
     protected override string FundingRatePath => throw new NotSupportedException("Spot market does not support funding rates.");
     protected override bool IsFutures => false;
 
@@ -137,7 +139,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         }).ToList());
     }
 
-    protected override Task<Result<List<BinanceKline?>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<List<CollectorModels.Models.BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();
 
     protected override Task<Result<List<FuturesFundingRate>>> GetFundingRatesAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
