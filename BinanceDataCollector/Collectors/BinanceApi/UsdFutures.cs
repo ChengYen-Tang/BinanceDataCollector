@@ -30,10 +30,10 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         return Result.Ok(klines);
     }
 
-    public override async Task<Result<List<ApiKline>>> GetIndexPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    public override async Task<Result<List<BinanceMarkIndexKline>>> GetIndexPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         DateTime endTime = DateTime.Today;
-        List<ApiKline> klines = [];
+        List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
             WebCallResult<ApiKline[]> result;
@@ -48,15 +48,23 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
-            klines.AddRange(result.Data);
+            klines.AddRange(result.Data.Select(kline => new BinanceMarkIndexKline
+            {
+                OpenPrice = kline.OpenPrice,
+                ClosePrice = kline.ClosePrice,
+                HighPrice = kline.HighPrice,
+                LowPrice = kline.LowPrice,
+                OpenTime = kline.OpenTime,
+                CloseTime = kline.CloseTime
+            }));
         }
         return Result.Ok(klines);
     }
 
-    public override async Task<Result<List<ApiKline>>> GetMarkPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    public override async Task<Result<List<BinanceMarkIndexKline>>> GetMarkPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         DateTime endTime = DateTime.Today;
-        List<ApiKline> klines = [];
+        List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
             WebCallResult<BinanceMarkIndexKline[]> result;
@@ -71,15 +79,15 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
-            klines.AddRange(result.Data.Select(x => (ApiKline)x));
+            klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
     }
 
-    public override async Task<Result<List<ApiKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    public override async Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         DateTime endTime = DateTime.Today;
-        List<ApiKline> klines = [];
+        List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
             WebCallResult<BinanceMarkIndexKline[]> result;
@@ -94,7 +102,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
-            klines.AddRange(result.Data.Select(x => (ApiKline)x));
+            klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
     }

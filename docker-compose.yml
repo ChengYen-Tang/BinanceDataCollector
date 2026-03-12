@@ -1,0 +1,32 @@
+version: "3"
+services:
+  binance-data-collector:
+    image: kenneth850511/binance-data-collector:latest
+    volumes:
+      - ./binance-data-collector/config/appsettings.json:/app/appsettings.json
+      - ./binance-data-collector/logs:/app/Logs
+      - ./binance-data-collector/data:/app/Data
+      - /etc/localtime:/etc/localtime:ro
+    container_name: BinanceDataCollector
+    depends_on:
+      - mssql
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:latest
+    user: root
+    volumes:
+      - ./mssql/data:/var/opt/mssql/data
+      - ./mssql/log:/var/opt/mssql/log
+      - ./mssql/secrets:/var/opt/mssql/secrets
+    environment:
+      ACCEPT_EULA: Y
+      MSSQL_SA_PASSWORD: P@ssw0rd
+      TZ: Asia/Taipei
+    restart: always
+    container_name: SQL-Server
+    ports:
+      - '1433:1433'
+    deploy:
+      resources:
+        limits:
+          memory: 16G

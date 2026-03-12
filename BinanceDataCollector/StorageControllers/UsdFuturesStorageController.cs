@@ -262,7 +262,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override async Task<Result<List<FuturesUsdtBinancePremiumIndexKline>>> GetPremiumIndexKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        Result<List<IBinanceKline>> result = await usdFutures.GetPremiumIndexKlinesAsync(symbol.Name, interval, startTime, ct);
+        Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetPremiumIndexKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
         return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinancePremiumIndexKline()
@@ -282,7 +282,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override async Task<Result<List<FuturesUsdtBinanceIndexPriceKline>>> GetIndexPriceKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        Result<List<IBinanceKline>> result = await usdFutures.GetIndexPriceKlinesAsync(symbol.Name, interval, startTime, ct);
+        Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetIndexPriceKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
         return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceIndexPriceKline()
@@ -302,7 +302,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override async Task<Result<List<FuturesUsdtBinanceMarkPriceKline>>> GetMarkPriceKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        Result<List<IBinanceKline>> result = await usdFutures.GetMarkPriceKlinesAsync(symbol.Name, interval, startTime, ct);
+        Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetMarkPriceKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
         return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceMarkPriceKline()
