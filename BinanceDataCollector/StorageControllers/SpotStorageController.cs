@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, FuturesFundingRate>
+internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, FuturesFundingRate, FuturesOpenInterestHistory, FuturesLongShortRatio, FuturesLongShortRatio, FuturesLongShortRatio>
 {
     private readonly Spot spot;
 
@@ -25,6 +25,10 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override string IndexPriceKlinePath => throw new NotSupportedException("Spot market does not support index price klines.");
     protected override string MarkPriceKlinePath => throw new NotSupportedException("Spot market does not support mark price klines.");
     protected override string FundingRatePath => throw new NotSupportedException("Spot market does not support funding rates.");
+    protected override string OpenInterestPath => throw new NotSupportedException("Spot market does not support open interest histories.");
+    protected override string TopLongShortPositionRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
+    protected override string TopLongShortAccountRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
+    protected override string GlobalLongShortAccountRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
     protected override bool IsFutures => false;
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -76,8 +80,26 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     public override Task<DateTime> GetLastPremiumIndexTimeAsync(BinanceSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support premium index klines.");
 
+    public override Task<DateTime> GetLastIndexPriceTimeAsync(BinanceSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support index price klines.");
+
+    public override Task<DateTime> GetLastMarkPriceTimeAsync(BinanceSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support mark price klines.");
+
     public override Task<DateTime> GetLastFundingTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support funding rates.");
+
+    public override Task<DateTime> GetLastOpenInterestTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support open interest histories.");
+
+    public override Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    public override Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    public override Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
 
     protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
     {
@@ -142,8 +164,26 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override Task<Result<List<CollectorModels.Models.BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();
 
+    protected override Task<Result<List<CollectorModels.Models.BinanceMarkIndexKline>>> GetIndexPriceKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support index price klines.");
+
+    protected override Task<Result<List<CollectorModels.Models.BinanceMarkIndexKline>>> GetMarkPriceKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support mark price klines.");
+
     protected override Task<Result<List<FuturesFundingRate>>> GetFundingRatesAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support funding rates.");
+
+    protected override Task<Result<List<FuturesOpenInterestHistory>>> GetOpenInterestHistoriesAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support open interest histories.");
+
+    protected override Task<Result<List<FuturesLongShortRatio>>> GetTopLongShortPositionRatiosAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    protected override Task<Result<List<FuturesLongShortRatio>>> GetTopLongShortAccountRatiosAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    protected override Task<Result<List<FuturesLongShortRatio>>> GetGlobalLongShortAccountRatiosAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
 
     protected override async Task<Result<List<BinanceSymbolInfo>>> GetMarketAsync(CancellationToken ct = default)
     {
@@ -177,6 +217,24 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default)
         => throw new NotImplementedException();
 
+    protected override Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support index price klines.");
+
+    protected override Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support mark price klines.");
+
     protected override Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support funding rates.");
+
+    protected override Task<Result<OpenInterestHistory[]>> GetCsvOpenInterestHistoriesAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support open interest histories.");
+
+    protected override Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    protected override Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    protected override Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support long/short ratios.");
 }

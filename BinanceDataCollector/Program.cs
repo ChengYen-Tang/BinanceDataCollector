@@ -50,7 +50,15 @@ IHost host = Host.CreateDefaultBuilder(args)
                     op.AddShardingTableRoute<FuturesUsdtBinanceIndexPriceKlineTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtBinanceMarkPriceKlineTableRoute>();
                     op.AddShardingTableRoute<FuturesUsdtFundingRateTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtOpenInterestHistoryTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtTopLongShortPositionRatioTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtTopLongShortAccountRatioTableRoute>();
+                    op.AddShardingTableRoute<FuturesUsdtGlobalLongShortAccountRatioTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinFundingRateTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinOpenInterestHistoryTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinTopLongShortPositionRatioTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinTopLongShortAccountRatioTableRoute>();
+                    op.AddShardingTableRoute<FuturesCoinGlobalLongShortAccountRatioTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinanceKlineVirtualTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinancePremiumIndexKlineTableRoute>();
                     op.AddShardingTableRoute<FuturesCoinBinanceIndexPriceKlineTableRoute>();

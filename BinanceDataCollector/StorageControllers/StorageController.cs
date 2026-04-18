@@ -10,13 +10,17 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal abstract class StorageController<T, T1, T2, T3, T4, T5>
+internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     where T : class
     where T1 : BinanceKline
     where T2 : BinanceMarkIndexKline
     where T3 : BinanceMarkIndexKline
     where T4 : BinanceMarkIndexKline
     where T5 : FuturesFundingRate
+    where T6 : FuturesOpenInterestHistory
+    where T7 : FuturesLongShortRatio
+    where T8 : FuturesLongShortRatio
+    where T9 : FuturesLongShortRatio
 {
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
@@ -28,11 +32,19 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5>
     protected static string RootIndexPriceKlinePath = Path.Combine(DataPath, "IndexPriceKline");
     protected static string RootMarkPriceKlinePath = Path.Combine(DataPath, "MarkPriceKline");
     protected static string RootFundingRatePath = Path.Combine(DataPath, "FundingRate");
+    protected static string RootOpenInterestPath = Path.Combine(DataPath, "OpenInterestHistory");
+    protected static string RootTopLongShortPositionRatioPath = Path.Combine(DataPath, "TopLongShortPositionRatio");
+    protected static string RootTopLongShortAccountRatioPath = Path.Combine(DataPath, "TopLongShortAccountRatio");
+    protected static string RootGlobalLongShortAccountRatioPath = Path.Combine(DataPath, "GlobalLongShortAccountRatio");
     protected abstract string KlinePath { get; }
     protected abstract string PremiumIndexKlinePath { get; }
     protected abstract string IndexPriceKlinePath { get; }
     protected abstract string MarkPriceKlinePath { get; }
     protected abstract string FundingRatePath { get; }
+    protected abstract string OpenInterestPath { get; }
+    protected abstract string TopLongShortPositionRatioPath { get; }
+    protected abstract string TopLongShortAccountRatioPath { get; }
+    protected abstract string GlobalLongShortAccountRatioPath { get; }
     protected abstract bool IsFutures { get; }
 
     public StorageController(IServiceProvider serviceProvider, ILogger logger)
@@ -142,6 +154,70 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5>
         return new AsyncWorkItem<IList<T5>>(InsertFundingRatesAsync, result.Value, ct);
     }
 
+    public async Task<AsyncWorkItem<IList<T6>>> UpdateOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug($"Start getting {typeof(T6).Name} {symbol} {startTime}...");
+        Result<List<T6>> result = await GetOpenInterestHistoriesAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting.");
+        if (result.IsFailed)
+        {
+            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<IList<T6>>(InsertOpenInterestHistoriesAsync, [], ct);
+        }
+
+        return new AsyncWorkItem<IList<T6>>(InsertOpenInterestHistoriesAsync, result.Value, ct);
+    }
+
+    public async Task<AsyncWorkItem<IList<T7>>> UpdateTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug($"Start getting {typeof(T7).Name} {symbol} {startTime}...");
+        Result<List<T7>> result = await GetTopLongShortPositionRatiosAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting.");
+        if (result.IsFailed)
+        {
+            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<IList<T7>>(InsertLongShortRatiosAsync, [], ct);
+        }
+
+        return new AsyncWorkItem<IList<T7>>(InsertLongShortRatiosAsync, result.Value, ct);
+    }
+
+    public async Task<AsyncWorkItem<IList<T8>>> UpdateTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug($"Start getting {typeof(T8).Name} {symbol} {startTime}...");
+        Result<List<T8>> result = await GetTopLongShortAccountRatiosAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting.");
+        if (result.IsFailed)
+        {
+            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<IList<T8>>(InsertLongShortRatiosAsync, [], ct);
+        }
+
+        return new AsyncWorkItem<IList<T8>>(InsertLongShortRatiosAsync, result.Value, ct);
+    }
+
+    public async Task<AsyncWorkItem<IList<T9>>> UpdateGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug($"Start getting {typeof(T9).Name} {symbol} {startTime}...");
+        Result<List<T9>> result = await GetGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting.");
+        if (result.IsFailed)
+        {
+            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<IList<T9>>(InsertLongShortRatiosAsync, [], ct);
+        }
+
+        return new AsyncWorkItem<IList<T9>>(InsertLongShortRatiosAsync, result.Value, ct);
+    }
+
     public async Task ExportToCsvAsync(CancellationToken ct = default)
     {
         Result<string[]> symbolNamesResult = await GetAllSymbolNamesAsync(ct);
@@ -244,6 +320,78 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5>
             CsvExporter exporter = new();
             await exporter.Export(fundingRatePath, fundingRateResult.Value);
         });
+
+        if (Directory.Exists(OpenInterestPath))
+            Directory.Delete(OpenInterestPath, true);
+        Directory.CreateDirectory(OpenInterestPath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<OpenInterestHistory[]> openInterestResult = await GetCsvOpenInterestHistoriesAsync(symbol, ct);
+            if (openInterestResult.IsFailed)
+            {
+                logger.LogError(openInterestResult.Errors[0].Message);
+                return;
+            }
+
+            string openInterestPath = Path.Combine(OpenInterestPath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(openInterestPath, openInterestResult.Value);
+        });
+
+        if (Directory.Exists(TopLongShortPositionRatioPath))
+            Directory.Delete(TopLongShortPositionRatioPath, true);
+        Directory.CreateDirectory(TopLongShortPositionRatioPath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<LongShortRatioCsv[]> ratioResult = await GetCsvTopLongShortPositionRatiosAsync(symbol, ct);
+            if (ratioResult.IsFailed)
+            {
+                logger.LogError(ratioResult.Errors[0].Message);
+                return;
+            }
+
+            string ratioPath = Path.Combine(TopLongShortPositionRatioPath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(ratioPath, ratioResult.Value);
+        });
+
+        if (Directory.Exists(TopLongShortAccountRatioPath))
+            Directory.Delete(TopLongShortAccountRatioPath, true);
+        Directory.CreateDirectory(TopLongShortAccountRatioPath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<LongShortRatioCsv[]> ratioResult = await GetCsvTopLongShortAccountRatiosAsync(symbol, ct);
+            if (ratioResult.IsFailed)
+            {
+                logger.LogError(ratioResult.Errors[0].Message);
+                return;
+            }
+
+            string ratioPath = Path.Combine(TopLongShortAccountRatioPath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(ratioPath, ratioResult.Value);
+        });
+
+        if (Directory.Exists(GlobalLongShortAccountRatioPath))
+            Directory.Delete(GlobalLongShortAccountRatioPath, true);
+        Directory.CreateDirectory(GlobalLongShortAccountRatioPath);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<LongShortRatioCsv[]> ratioResult = await GetCsvGlobalLongShortAccountRatiosAsync(symbol, ct);
+            if (ratioResult.IsFailed)
+            {
+                logger.LogError(ratioResult.Errors[0].Message);
+                return;
+            }
+
+            string ratioPath = Path.Combine(GlobalLongShortAccountRatioPath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(ratioPath, ratioResult.Value);
+        });
     }
 
     protected async Task InsertKlinesAsync<TKline>(IList<TKline> klines, CancellationToken ct = default)
@@ -267,6 +415,53 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5>
         catch (Exception ex)
         {
             logger.LogError($"Symbol: {klines[0].SymbolInfoId}, Interval: {klines[0].Interval}, Message: {ex.Message}");
+        }
+    }
+
+    protected async Task InsertLongShortRatiosAsync<TLongShortRatio>(IList<TLongShortRatio> ratios, CancellationToken ct = default)
+        where TLongShortRatio : FuturesLongShortRatio
+    {
+        if (!ratios.Any())
+            return;
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        try
+        {
+            logger.LogDebug($"Start inserting {typeof(TLongShortRatio).Name} Count: {ratios.Count}...");
+            Dictionary<DbContext, IEnumerable<TLongShortRatio>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(ratios);
+            using IDbContextTransaction transaction = db.Database.BeginTransaction();
+            foreach (KeyValuePair<DbContext, IEnumerable<TLongShortRatio>> item in bulkShardingEnumerable)
+                await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            transaction.Commit();
+            logger.LogDebug("Finish inserting.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Symbol: {ratios[0].SymbolInfoId}, Message: {ex.Message}");
+        }
+    }
+
+    protected async Task InsertOpenInterestHistoriesAsync(IList<T6> openInterestHistories, CancellationToken ct = default)
+    {
+        if (!openInterestHistories.Any())
+            return;
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        try
+        {
+            logger.LogDebug($"Start inserting {typeof(T6).Name} Count: {openInterestHistories.Count}...");
+            Dictionary<DbContext, IEnumerable<T6>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(openInterestHistories);
+            using IDbContextTransaction transaction = db.Database.BeginTransaction();
+            foreach (KeyValuePair<DbContext, IEnumerable<T6>> item in bulkShardingEnumerable)
+                await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            transaction.Commit();
+            logger.LogDebug("Finish inserting.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Symbol: {openInterestHistories[0].SymbolInfoId}, Message: {ex.Message}");
         }
     }
 
@@ -295,11 +490,13 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5>
 
     public abstract Task<DateTime> GetLastTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastPremiumIndexTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
-    public virtual Task<DateTime> GetLastIndexPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default)
-        => Task.FromResult(yearsReserved);
-    public virtual Task<DateTime> GetLastMarkPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default)
-        => Task.FromResult(yearsReserved);
+    public abstract Task<DateTime> GetLastIndexPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastMarkPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastFundingTimeAsync(T symbol, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastOpenInterestTimeAsync(T symbol, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(T symbol, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(T symbol, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(T symbol, CancellationToken ct = default);
 
     public abstract Task DeleteOldData(CancellationToken ct = default);
 
@@ -307,26 +504,36 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5>
 
     protected abstract Task<Result<List<T1>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T2>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
-    protected virtual Task<Result<List<T3>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
-        => Task.FromResult(Result.Fail<List<T3>>("Not supported."));
-    protected virtual Task<Result<List<T4>>> GetMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
-        => Task.FromResult(Result.Fail<List<T4>>("Not supported."));
+    protected abstract Task<Result<List<T3>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T4>>> GetMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T5>>> GetFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T6>>> GetOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T7>>> GetTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T8>>> GetTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T9>>> GetGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected abstract Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default);
 
     protected abstract Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default);
 
     protected abstract Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default);
-    protected virtual Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default)
-        => Task.FromResult(Result.Fail<PremiumIndexKline[]>("Not supported."));
-    protected virtual Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default)
-        => Task.FromResult(Result.Fail<PremiumIndexKline[]>("Not supported."));
+    protected abstract Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default);
     protected abstract Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<OpenInterestHistory[]>> GetCsvOpenInterestHistoriesAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
 
     protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
         => $"{symbol}-{interval}-{closeTime:s}";
 
     protected static string CombineFundingRateId(string symbol, DateTime fundingTime)
         => $"{symbol}-{fundingTime:s}";
+
+    protected static string CombineOpenInterestId(string symbol, DateTime timestamp)
+        => $"{symbol}-{timestamp:s}";
+
+    protected static string CombineLongShortRatioId(string symbol, DateTime timestamp)
+        => $"{symbol}-{timestamp:s}";
 }

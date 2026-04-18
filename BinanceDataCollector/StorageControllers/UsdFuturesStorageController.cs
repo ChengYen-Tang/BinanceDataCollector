@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate>
+internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate, FuturesUsdtOpenInterestHistory, FuturesUsdtTopLongShortPositionRatio, FuturesUsdtTopLongShortAccountRatio, FuturesUsdtGlobalLongShortAccountRatio>
 {
     private readonly UsdFutures usdFutures;
 
@@ -24,6 +24,10 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
     protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, "UsdFutures"); } }
     protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, "UsdFutures"); } }
     protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, "UsdFutures"); } }
+    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, "UsdFutures"); } }
+    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, "UsdFutures"); } }
+    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, "UsdFutures"); } }
+    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, "UsdFutures"); } }
     protected override bool IsFutures => true;
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -71,6 +75,30 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
                 .Select(item => new { item.Id, item.SymbolInfoId })
                 .ToArrayAsync(ct);
 
+            var openInterestMinimalData = await db.FuturesUsdtOpenInterestHistories
+                .AsNoTracking()
+                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
+            var topLongShortPositionRatioMinimalData = await db.FuturesUsdtTopLongShortPositionRatios
+                .AsNoTracking()
+                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
+            var topLongShortAccountRatioMinimalData = await db.FuturesUsdtTopLongShortAccountRatios
+                .AsNoTracking()
+                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
+            var globalLongShortAccountRatioMinimalData = await db.FuturesUsdtGlobalLongShortAccountRatios
+                .AsNoTracking()
+                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
+                .Select(item => new { item.Id, item.SymbolInfoId })
+                .ToArrayAsync(ct);
+
             // 轉換為只包含必要欄位的 entity
             FuturesUsdtBinanceKline[] klines = [.. klineMinimalData.Select(x => new FuturesUsdtBinanceKline
             {
@@ -102,12 +130,40 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
                 SymbolInfoId = x.SymbolInfoId
             })];
 
+            FuturesUsdtOpenInterestHistory[] openInterestHistories = [.. openInterestMinimalData.Select(x => new FuturesUsdtOpenInterestHistory
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
+            FuturesUsdtTopLongShortPositionRatio[] topLongShortPositionRatios = [.. topLongShortPositionRatioMinimalData.Select(x => new FuturesUsdtTopLongShortPositionRatio
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
+            FuturesUsdtTopLongShortAccountRatio[] topLongShortAccountRatios = [.. topLongShortAccountRatioMinimalData.Select(x => new FuturesUsdtTopLongShortAccountRatio
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
+            FuturesUsdtGlobalLongShortAccountRatio[] globalLongShortAccountRatios = [.. globalLongShortAccountRatioMinimalData.Select(x => new FuturesUsdtGlobalLongShortAccountRatio
+            {
+                Id = x.Id,
+                SymbolInfoId = x.SymbolInfoId
+            })];
+
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinancePremiumIndexKline>> bulkShardingEnumerablePremiumIndex = db.BulkShardingTableEnumerable(premiumIndexKlines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceIndexPriceKline>> bulkShardingEnumerableIndexPrice = db.BulkShardingTableEnumerable(indexPriceKlines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtBinanceMarkPriceKline>> bulkShardingEnumerableMarkPrice = db.BulkShardingTableEnumerable(markPriceKlines);
             Dictionary<DbContext, IEnumerable<FuturesUsdtFundingRate>> bulkShardingEnumerableFundingRates = db.BulkShardingTableEnumerable(fundingRates);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtOpenInterestHistory>> bulkShardingEnumerableOpenInterest = db.BulkShardingTableEnumerable(openInterestHistories);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtTopLongShortPositionRatio>> bulkShardingEnumerableTopLongShortPositionRatios = db.BulkShardingTableEnumerable(topLongShortPositionRatios);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtTopLongShortAccountRatio>> bulkShardingEnumerableTopLongShortAccountRatios = db.BulkShardingTableEnumerable(topLongShortAccountRatios);
+            Dictionary<DbContext, IEnumerable<FuturesUsdtGlobalLongShortAccountRatio>> bulkShardingEnumerableGlobalLongShortAccountRatios = db.BulkShardingTableEnumerable(globalLongShortAccountRatios);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinanceKline>> item in bulkShardingEnumerable)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinancePremiumIndexKline>> item in bulkShardingEnumerablePremiumIndex)
@@ -117,6 +173,14 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtBinanceMarkPriceKline>> item in bulkShardingEnumerableMarkPrice)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtFundingRate>> item in bulkShardingEnumerableFundingRates)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtOpenInterestHistory>> item in bulkShardingEnumerableOpenInterest)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtTopLongShortPositionRatio>> item in bulkShardingEnumerableTopLongShortPositionRatios)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtTopLongShortAccountRatio>> item in bulkShardingEnumerableTopLongShortAccountRatios)
+                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            foreach (KeyValuePair<DbContext, IEnumerable<FuturesUsdtGlobalLongShortAccountRatio>> item in bulkShardingEnumerableGlobalLongShortAccountRatios)
                 await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
             await transaction.CommitAsync(ct);
         }
@@ -402,6 +466,121 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         }).ToList());
     }
 
+    public override async Task<DateTime> GetLastOpenInterestTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtOpenInterestHistories.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtOpenInterestHistories.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
+            : yearsReserved;
+    }
+
+    protected override async Task<Result<List<FuturesUsdtOpenInterestHistory>>> GetOpenInterestHistoriesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        string symbolName = symbol.Name;
+        Result<List<BinanceFuturesOpenInterestHistory>> result = await usdFutures.GetOpenInterestHistoryAsync(symbolName, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+
+        List<FuturesUsdtOpenInterestHistory> openInterestHistories = result.Value
+            .Where(item => item.Timestamp.HasValue)
+            .AsParallel()
+            .Select(item => new FuturesUsdtOpenInterestHistory
+            {
+                Timestamp = item.Timestamp!.Value,
+                SumOpenInterest = decimal.ToDouble(item.SumOpenInterest),
+                SumOpenInterestValue = decimal.ToDouble(item.SumOpenInterestValue),
+                SymbolInfoId = symbolName,
+                Id = CombineOpenInterestId(symbolName, item.Timestamp.Value)
+            }).ToList();
+        return Result.Ok(openInterestHistories);
+    }
+
+    public override async Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtTopLongShortPositionRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtTopLongShortPositionRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
+            : yearsReserved;
+    }
+
+    protected override async Task<Result<List<FuturesUsdtTopLongShortPositionRatio>>> GetTopLongShortPositionRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        string symbolName = symbol.Name;
+        Result<List<BinanceFuturesLongShortRatio>> result = await usdFutures.GetTopLongShortPositionRatioAsync(symbolName, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtTopLongShortPositionRatio
+        {
+            Timestamp = item.Timestamp!.Value,
+            LongShortRatio = decimal.ToDouble(item.LongShortRatio),
+            LongAccount = decimal.ToDouble(item.LongAccount),
+            ShortAccount = decimal.ToDouble(item.ShortAccount),
+            SymbolInfoId = symbolName,
+            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+        }).ToList());
+    }
+
+    public override async Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtTopLongShortAccountRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtTopLongShortAccountRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
+            : yearsReserved;
+    }
+
+    protected override async Task<Result<List<FuturesUsdtTopLongShortAccountRatio>>> GetTopLongShortAccountRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        string symbolName = symbol.Name;
+        Result<List<BinanceFuturesLongShortRatio>> result = await usdFutures.GetTopLongShortAccountRatioAsync(symbolName, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtTopLongShortAccountRatio
+        {
+            Timestamp = item.Timestamp!.Value,
+            LongShortRatio = decimal.ToDouble(item.LongShortRatio),
+            LongAccount = decimal.ToDouble(item.LongAccount),
+            ShortAccount = decimal.ToDouble(item.ShortAccount),
+            SymbolInfoId = symbolName,
+            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+        }).ToList());
+    }
+
+    public override async Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        return (await db.FuturesUsdtGlobalLongShortAccountRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
+            ? await db.FuturesUsdtGlobalLongShortAccountRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
+            : yearsReserved;
+    }
+
+    protected override async Task<Result<List<FuturesUsdtGlobalLongShortAccountRatio>>> GetGlobalLongShortAccountRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        string symbolName = symbol.Name;
+        Result<List<BinanceFuturesLongShortRatio>> result = await usdFutures.GetGlobalLongShortAccountRatioAsync(symbolName, startTime, ct);
+        if (result.IsFailed)
+            return Result.Fail(result.Errors);
+
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtGlobalLongShortAccountRatio
+        {
+            Timestamp = item.Timestamp!.Value,
+            LongShortRatio = decimal.ToDouble(item.LongShortRatio),
+            LongAccount = decimal.ToDouble(item.LongAccount),
+            ShortAccount = decimal.ToDouble(item.ShortAccount),
+            SymbolInfoId = symbolName,
+            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+        }).ToList());
+    }
+
     protected override async Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default)
     {
         using IServiceScope scope = serviceProvider.CreateScope();
@@ -419,6 +598,86 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         if (rates.Length == 0)
             return Result.Fail("No funding rates found.");
         return Result.Ok(rates);
+    }
+
+    protected override async Task<Result<OpenInterestHistory[]>> GetCsvOpenInterestHistoriesAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        OpenInterestHistory[] openInterestHistories = await db.FuturesUsdtOpenInterestHistories.AsNoTracking()
+            .Where(item => item.SymbolInfoId == symbol)
+            .OrderBy(item => item.Timestamp)
+            .Select(item => new OpenInterestHistory
+            {
+                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
+                SumOpenInterest = item.SumOpenInterest,
+                SumOpenInterestValue = item.SumOpenInterestValue
+            }).ToArrayAsync(ct);
+
+        if (openInterestHistories.Length == 0)
+            return Result.Fail("No open interest histories found.");
+        return Result.Ok(openInterestHistories);
+    }
+
+    protected override async Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        LongShortRatioCsv[] ratios = await db.FuturesUsdtTopLongShortPositionRatios.AsNoTracking()
+            .Where(item => item.SymbolInfoId == symbol)
+            .OrderBy(item => item.Timestamp)
+            .Select(item => new LongShortRatioCsv
+            {
+                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
+                LongShortRatio = item.LongShortRatio,
+                LongAccount = item.LongAccount,
+                ShortAccount = item.ShortAccount
+            }).ToArrayAsync(ct);
+        if (ratios.Length == 0)
+            return Result.Fail("No top long short position ratios found.");
+        return Result.Ok(ratios);
+    }
+
+    protected override async Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        LongShortRatioCsv[] ratios = await db.FuturesUsdtTopLongShortAccountRatios.AsNoTracking()
+            .Where(item => item.SymbolInfoId == symbol)
+            .OrderBy(item => item.Timestamp)
+            .Select(item => new LongShortRatioCsv
+            {
+                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
+                LongShortRatio = item.LongShortRatio,
+                LongAccount = item.LongAccount,
+                ShortAccount = item.ShortAccount
+            }).ToArrayAsync(ct);
+        if (ratios.Length == 0)
+            return Result.Fail("No top long short account ratios found.");
+        return Result.Ok(ratios);
+    }
+
+    protected override async Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        LongShortRatioCsv[] ratios = await db.FuturesUsdtGlobalLongShortAccountRatios.AsNoTracking()
+            .Where(item => item.SymbolInfoId == symbol)
+            .OrderBy(item => item.Timestamp)
+            .Select(item => new LongShortRatioCsv
+            {
+                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
+                LongShortRatio = item.LongShortRatio,
+                LongAccount = item.LongAccount,
+                ShortAccount = item.ShortAccount
+            }).ToArrayAsync(ct);
+        if (ratios.Length == 0)
+            return Result.Fail("No global long short account ratios found.");
+        return Result.Ok(ratios);
     }
 
 }

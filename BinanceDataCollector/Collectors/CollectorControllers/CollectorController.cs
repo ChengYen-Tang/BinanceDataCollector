@@ -4,22 +4,26 @@ using CollectorModels.Models;
 
 namespace BinanceDataCollector.Collectors.CollectorControllers;
 
-internal abstract class CollectorController<T, T1, T2, T3, T4, T5> : ICollectorController
+internal abstract class CollectorController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9> : ICollectorController
     where T : class
     where T1 : BinanceKline
     where T2 : BinanceMarkIndexKline
     where T3 : BinanceMarkIndexKline
     where T4 : BinanceMarkIndexKline
     where T5 : FuturesFundingRate
+    where T6 : FuturesOpenInterestHistory
+    where T7 : FuturesLongShortRatio
+    where T8 : FuturesLongShortRatio
+    where T9 : FuturesLongShortRatio
 {
     protected readonly ILogger logger;
     protected readonly ProductionLine productionLine;
     protected const int year = -1;
     protected abstract bool IsEnable { get; }
     protected abstract bool IsFutures { get; }
-    private readonly StorageController<T, T1, T2, T3, T4, T5> storageController;
+    private readonly StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9> storageController;
 
-    public CollectorController(ILogger logger, ProductionLine productionLine, StorageController<T, T1, T2, T3, T4, T5> storageController)
+    public CollectorController(ILogger logger, ProductionLine productionLine, StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9> storageController)
         => (this.logger, this.productionLine, this.storageController) = (logger, productionLine, storageController);
 
     public async Task GatherAsync(CancellationToken ct = default)
@@ -73,6 +77,26 @@ internal abstract class CollectorController<T, T1, T2, T3, T4, T5> : ICollectorC
         AsyncWorkItem<T, DateTime> fundingWorkItem = new(GatherFundingRatesAsync, symbol, fundingStartTime, ct);
         if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.GatherChannel.Writer.WriteAsync(fundingWorkItem, ct);
+
+        DateTime openInterestStartTime = await storageController.GetLastOpenInterestTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> openInterestWorkItem = new(GatherOpenInterestHistoriesAsync, symbol, openInterestStartTime, ct);
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(openInterestWorkItem, ct);
+
+        DateTime topLongShortPositionStartTime = await storageController.GetLastTopLongShortPositionRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> topLongShortPositionWorkItem = new(GatherTopLongShortPositionRatiosAsync, symbol, topLongShortPositionStartTime, ct);
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(topLongShortPositionWorkItem, ct);
+
+        DateTime topLongShortAccountStartTime = await storageController.GetLastTopLongShortAccountRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> topLongShortAccountWorkItem = new(GatherTopLongShortAccountRatiosAsync, symbol, topLongShortAccountStartTime, ct);
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(topLongShortAccountWorkItem, ct);
+
+        DateTime globalLongShortAccountStartTime = await storageController.GetLastGlobalLongShortAccountRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> globalLongShortAccountWorkItem = new(GatherGlobalLongShortAccountRatiosAsync, symbol, globalLongShortAccountStartTime, ct);
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(globalLongShortAccountWorkItem, ct);
     }
 
     private async Task GatherKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -110,6 +134,34 @@ internal abstract class CollectorController<T, T1, T2, T3, T4, T5> : ICollectorC
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
+    private async Task GatherOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        AsyncWorkItem<IList<T6>> workItem = await storageController.UpdateOpenInterestHistoriesAsync(symbol, startTime, ct);
+        if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
+    }
+
+    private async Task GatherTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        AsyncWorkItem<IList<T7>> workItem = await storageController.UpdateTopLongShortPositionRatiosAsync(symbol, startTime, ct);
+        if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
+    }
+
+    private async Task GatherTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        AsyncWorkItem<IList<T8>> workItem = await storageController.UpdateTopLongShortAccountRatiosAsync(symbol, startTime, ct);
+        if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
+    }
+
+    private async Task GatherGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        AsyncWorkItem<IList<T9>> workItem = await storageController.UpdateGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
+        if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
+    }
+
     private AsyncWorkItem DeleteOldData(CancellationToken ct = default)
         => new(storageController.DeleteOldData, ct);
 
@@ -121,19 +173,19 @@ internal abstract class CollectorController<T, T1, T2, T3, T4, T5> : ICollectorC
     }
 }
 
-internal class SpotCollectorController(IConfiguration configuration, ILogger<SpotCollectorController> logger, ProductionLine productionLine, SpotStorageController storageController) : CollectorController<BinanceSymbolInfo, SpotBinanceKline, BinanceMarkIndexKline, BinanceMarkIndexKline, BinanceMarkIndexKline, FuturesFundingRate>(logger, productionLine, storageController)
+internal class SpotCollectorController(IConfiguration configuration, ILogger<SpotCollectorController> logger, ProductionLine productionLine, SpotStorageController storageController) : CollectorController<BinanceSymbolInfo, SpotBinanceKline, BinanceMarkIndexKline, BinanceMarkIndexKline, BinanceMarkIndexKline, FuturesFundingRate, FuturesOpenInterestHistory, FuturesLongShortRatio, FuturesLongShortRatio, FuturesLongShortRatio>(logger, productionLine, storageController)
 {
     protected override bool IsEnable => configuration.GetValue("Market:Spot:IsEnabled", true);
     protected override bool IsFutures => false;
 }
 
-internal class CoinFuturesCollectorController(IConfiguration configuration, ILogger<CoinFuturesCollectorController> logger, ProductionLine productionLine, CoinFuturesStorageController storageController) : CollectorController<BinanceFuturesCoinSymbolInfo, FuturesCoinBinanceKline, FuturesCoinBinancePremiumIndexKline, FuturesCoinBinanceIndexPriceKline, FuturesCoinBinanceMarkPriceKline, FuturesCoinFundingRate>(logger, productionLine, storageController)
+internal class CoinFuturesCollectorController(IConfiguration configuration, ILogger<CoinFuturesCollectorController> logger, ProductionLine productionLine, CoinFuturesStorageController storageController) : CollectorController<BinanceFuturesCoinSymbolInfo, FuturesCoinBinanceKline, FuturesCoinBinancePremiumIndexKline, FuturesCoinBinanceIndexPriceKline, FuturesCoinBinanceMarkPriceKline, FuturesCoinFundingRate, FuturesCoinOpenInterestHistory, FuturesCoinTopLongShortPositionRatio, FuturesCoinTopLongShortAccountRatio, FuturesCoinGlobalLongShortAccountRatio>(logger, productionLine, storageController)
 {
     protected override bool IsEnable => configuration.GetValue("Market:CoinFutures:IsEnabled", true);
     protected override bool IsFutures => true;
 }
 
-internal class UsdFuturesCollectorController(IConfiguration configuration, ILogger<UsdFuturesCollectorController> logger, ProductionLine productionLine, UsdFuturesStorageController storageController) : CollectorController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate>(logger, productionLine, storageController)
+internal class UsdFuturesCollectorController(IConfiguration configuration, ILogger<UsdFuturesCollectorController> logger, ProductionLine productionLine, UsdFuturesStorageController storageController) : CollectorController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate, FuturesUsdtOpenInterestHistory, FuturesUsdtTopLongShortPositionRatio, FuturesUsdtTopLongShortAccountRatio, FuturesUsdtGlobalLongShortAccountRatio>(logger, productionLine, storageController)
 {
     protected override bool IsEnable => configuration.GetValue("Market:UsdFutures:IsEnabled", true);
     protected override bool IsFutures => true;

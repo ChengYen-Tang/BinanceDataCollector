@@ -78,6 +78,18 @@ namespace CollectorModels
             modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
                 .HasMany(item => item.BinanceMarkPriceKlines)
                 .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.OpenInterestHistories)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.TopLongShortPositionRatios)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.TopLongShortAccountRatios)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesCoinSymbolInfo>()
+                .HasMany(item => item.GlobalLongShortAccountRatios)
+                .WithOne(item => item.SymbolInfo);
             #endregion
             #region BinanceFuturesUsdtSymbolInfo
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
@@ -115,6 +127,18 @@ namespace CollectorModels
                 .WithOne(item => item.SymbolInfo);
             modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
                 .HasMany(item => item.FundingRates)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.OpenInterestHistories)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.TopLongShortPositionRatios)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.TopLongShortAccountRatios)
+                .WithOne(item => item.SymbolInfo);
+            modelBuilder.Entity<BinanceFuturesUsdtSymbolInfo>()
+                .HasMany(item => item.GlobalLongShortAccountRatios)
                 .WithOne(item => item.SymbolInfo);
             #endregion
 
@@ -175,6 +199,34 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesUsdtOpenInterestHistory
+            modelBuilder.Entity<FuturesUsdtOpenInterestHistory>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.OpenInterestHistories)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesUsdtTopLongShortPositionRatio
+            modelBuilder.Entity<FuturesUsdtTopLongShortPositionRatio>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.TopLongShortPositionRatios)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesUsdtTopLongShortAccountRatio
+            modelBuilder.Entity<FuturesUsdtTopLongShortAccountRatio>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.TopLongShortAccountRatios)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesUsdtGlobalLongShortAccountRatio
+            modelBuilder.Entity<FuturesUsdtGlobalLongShortAccountRatio>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.GlobalLongShortAccountRatios)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
             #region FuturesCoinBinanceKline
             modelBuilder.Entity<FuturesCoinBinanceKline>()
                 .Property(e => e.Interval)
@@ -222,6 +274,34 @@ namespace CollectorModels
                 .HasForeignKey(item => item.SymbolInfoId)
                 .OnDelete(DeleteBehavior.Cascade);
             #endregion
+            #region FuturesCoinTopLongShortPositionRatio
+            modelBuilder.Entity<FuturesCoinTopLongShortPositionRatio>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.TopLongShortPositionRatios)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesCoinTopLongShortAccountRatio
+            modelBuilder.Entity<FuturesCoinTopLongShortAccountRatio>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.TopLongShortAccountRatios)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesCoinGlobalLongShortAccountRatio
+            modelBuilder.Entity<FuturesCoinGlobalLongShortAccountRatio>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.GlobalLongShortAccountRatios)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
+            #region FuturesCoinOpenInterestHistory
+            modelBuilder.Entity<FuturesCoinOpenInterestHistory>()
+                .HasOne(item => item.SymbolInfo)
+                .WithMany(item => item.OpenInterestHistories)
+                .HasForeignKey(item => item.SymbolInfoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            #endregion
         }
 
         public virtual DbSet<BinanceSymbolInfo> BinanceSymbolInfos { get; set; }
@@ -233,11 +313,19 @@ namespace CollectorModels
         public virtual DbSet<FuturesUsdtBinanceIndexPriceKline> FuturesUsdtBinanceIndexPriceKlines { get; set; }
         public virtual DbSet<FuturesUsdtBinanceMarkPriceKline> FuturesUsdtBinanceMarkPriceKlines { get; set; }
         public virtual DbSet<FuturesUsdtFundingRate> FuturesUsdtFundingRates { get; set; }
+        public virtual DbSet<FuturesUsdtOpenInterestHistory> FuturesUsdtOpenInterestHistories { get; set; }
+        public virtual DbSet<FuturesUsdtTopLongShortPositionRatio> FuturesUsdtTopLongShortPositionRatios { get; set; }
+        public virtual DbSet<FuturesUsdtTopLongShortAccountRatio> FuturesUsdtTopLongShortAccountRatios { get; set; }
+        public virtual DbSet<FuturesUsdtGlobalLongShortAccountRatio> FuturesUsdtGlobalLongShortAccountRatios { get; set; }
         public virtual DbSet<FuturesCoinBinanceKline> FuturesCoinBinanceKlines { get; set; }
         public virtual DbSet<FuturesCoinBinancePremiumIndexKline> FuturesCoinBinancePremiumIndexKlines { get; set; }
         public virtual DbSet<FuturesCoinBinanceIndexPriceKline> FuturesCoinBinanceIndexPriceKlines { get; set; }
         public virtual DbSet<FuturesCoinBinanceMarkPriceKline> FuturesCoinBinanceMarkPriceKlines { get; set; }
         public virtual DbSet<FuturesCoinFundingRate> FuturesCoinFundingRates { get; set; }
+        public virtual DbSet<FuturesCoinOpenInterestHistory> FuturesCoinOpenInterestHistories { get; set; }
+        public virtual DbSet<FuturesCoinTopLongShortPositionRatio> FuturesCoinTopLongShortPositionRatios { get; set; }
+        public virtual DbSet<FuturesCoinTopLongShortAccountRatio> FuturesCoinTopLongShortAccountRatios { get; set; }
+        public virtual DbSet<FuturesCoinGlobalLongShortAccountRatio> FuturesCoinGlobalLongShortAccountRatios { get; set; }
 
         public IRouteTail RouteTail { get; set; }
     }
