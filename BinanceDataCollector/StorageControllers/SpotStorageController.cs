@@ -31,6 +31,19 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override string GlobalLongShortAccountRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
     protected override bool IsFutures => false;
 
+    protected override string GetSymbolName(BinanceSymbolInfo symbol)
+        => symbol.Name;
+
+    protected override Task<List<string>> GetExistingSymbolNamesAsync(BinanceDbContext db, CancellationToken ct = default)
+        => db.BinanceSymbolInfos.AsNoTracking().Select(item => item.Name).ToListAsync(ct);
+
+    protected override async Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
+    {
+        await db.DropShardingTablesAsync(delistedSymbols, [typeof(SpotBinanceKline).Name], LogDropStatus, ct);
+
+        await db.BinanceSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
+    }
+
     public override async Task DeleteOldData(CancellationToken ct = default)
     {
         using IServiceScope scope = serviceProvider.CreateScope();

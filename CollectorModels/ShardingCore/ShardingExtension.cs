@@ -7,13 +7,91 @@ using ShardingCore.Extensions;
 using ShardingCore.Sharding.Abstractions;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CollectorModels.ShardingCore;
 
 public static class ShardingExtension
 {
+    public static async Task<List<ShardingTableDropResult>> DropShardingTablesAsync(this DbContext dbContext, IEnumerable<string> symbols, IEnumerable<string> tableNames, Action<ShardingTableDropResult>? onTableProcessed = null, CancellationToken ct = default)
+    {
+        List<ShardingTableDropResult> results = [];
+        foreach (string symbol in symbols)
+        {
+            foreach (string tableName in tableNames)
+            {
+                string[] candidateEscapedTables = BuildCandidateEscapedTableNames(tableName, symbol);
+                string escapedTable = candidateEscapedTables[0];
+                bool existedBeforeDrop = false;
+                foreach (string candidateEscapedTable in candidateEscapedTables)
+                {
+                    if (await TableExistsAsync(dbContext, candidateEscapedTable, ct))
+                    {
+                        escapedTable = candidateEscapedTable;
+                        existedBeforeDrop = true;
+                        break;
+                    }
+                }
+
+                if (existedBeforeDrop)
+                    await dbContext.Database.ExecuteSqlRawAsync($"DROP TABLE [dbo].[{escapedTable}];", ct);
+
+                bool existsAfterDrop = await TableExistsAsync(dbContext, escapedTable, ct);
+                ShardingTableDropResult result = new(symbol, tableName, escapedTable, existedBeforeDrop, existsAfterDrop);
+                results.Add(result);
+                onTableProcessed?.Invoke(result);
+            }
+        }
+
+        return results;
+    }
+
+    private static string[] BuildCandidateEscapedTableNames(string logicalTableName, string symbol)
+    {
+        string[] baseNames = logicalTableName.EndsWith("s", StringComparison.Ordinal)
+            ? [logicalTableName]
+            : [logicalTableName + "s", logicalTableName];
+
+        return [.. baseNames.Select(baseName => $"{baseName}_{symbol}".Replace("]", "]]"))];
+    }
+
+    private static async Task<bool> TableExistsAsync(DbContext dbContext, string escapedTableName, CancellationToken ct)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        bool shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(ct);
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT CASE WHEN OBJECT_ID(@tableName, N'U') IS NULL THEN 0 ELSE 1 END";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@tableName";
+            parameter.Value = $"[dbo].[{escapedTableName}]";
+            command.Parameters.Add(parameter);
+
+            object? value = await command.ExecuteScalarAsync(ct);
+            return Convert.ToInt32(value) == 1;
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
+        }
+    }
+
+    public sealed record ShardingTableDropResult(string Symbol, string TableName, string EscapedTableName, bool ExistedBeforeDrop, bool ExistsAfterDrop)
+    {
+        public bool DroppedSuccessfully => ExistedBeforeDrop && !ExistsAfterDrop;
+        public bool AlreadyMissing => !ExistedBeforeDrop;
+    }
+
     /// <summary>
     /// 根据对象集合解析
     /// </summary>

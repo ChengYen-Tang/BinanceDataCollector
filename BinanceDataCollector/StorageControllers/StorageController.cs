@@ -7,6 +7,7 @@ using EFCore.BulkExtensions;
 using Magicodes.ExporterAndImporter.Csv;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using System.Diagnostics;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -61,14 +62,32 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start updating {typeof(T).Name} Count: {result.Value.Count}...");
-            using IDbContextTransaction transaction = db.Database.BeginTransaction();
-            await db.BulkInsertOrUpdateOrDeleteAsync(result.Value, bulkConfig, cancellationToken: ct);
-            transaction.Commit();
-            logger.LogDebug($"Finish updating.");
+            string[] currentSymbols = [.. result.Value.Select(GetSymbolName)];
+            List<string> existingSymbols = await GetExistingSymbolNamesAsync(db, ct);
+            string[] delistedSymbols = [.. existingSymbols.Except(currentSymbols)];
+
+            logger.LogInformation("Start syncing {SymbolType}. MarketCount: {MarketCount}, DelistedCount: {DelistedCount}", typeof(T).Name, result.Value.Count, delistedSymbols.Length);
+
+            Stopwatch upsertStopwatch = Stopwatch.StartNew();
+            using (IDbContextTransaction transaction = db.Database.BeginTransaction())
+            {
+                await db.BulkInsertOrUpdateAsync(result.Value, bulkConfig, cancellationToken: ct);
+                transaction.Commit();
+            }
+            upsertStopwatch.Stop();
+            logger.LogInformation("Finish upserting {SymbolType}. Cost: {ElapsedMs}ms", typeof(T).Name, upsertStopwatch.ElapsedMilliseconds);
+
+            if (delistedSymbols.Length > 0)
+            {
+                Stopwatch deleteStopwatch = Stopwatch.StartNew();
+                await DeleteDelistedSymbolsAsync(db, delistedSymbols, ct);
+                deleteStopwatch.Stop();
+                logger.LogDebug("Finish deleting delisted {SymbolType}. Count: {DelistedCount}, Cost: {ElapsedMs}ms", typeof(T).Name, delistedSymbols.Length, deleteStopwatch.ElapsedMilliseconds);
+            }
         }
         catch (Exception ex)
         {
+            logger.LogError(ex, "Sync {SymbolType} failed", typeof(T).Name);
             return Result.Fail(ex.Message);
         }
         return Result.Ok(result.Value);
@@ -500,6 +519,10 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public abstract Task DeleteOldData(CancellationToken ct = default);
 
+    protected abstract string GetSymbolName(T symbol);
+    protected abstract Task<List<string>> GetExistingSymbolNamesAsync(BinanceDbContext db, CancellationToken ct = default);
+    protected abstract Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default);
+
     protected abstract Task<Result<List<T>>> GetMarketAsync(CancellationToken ct = default);
 
     protected abstract Task<Result<List<T1>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
@@ -524,6 +547,16 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default);
     protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
     protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
+
+    protected void LogDropStatus(ShardingExtension.ShardingTableDropResult result)
+    {
+        if (result.ExistedBeforeDrop && result.ExistsAfterDrop)
+            logger.LogError("Table cleanup status. Table: {Table}, Missing: 0, Dropped: 0, Failed: 1", result.EscapedTableName);
+        else if (result.DroppedSuccessfully)
+            logger.LogInformation("Table cleanup status. Table: {Table}, Missing: 0, Dropped: 1, Failed: 0", result.EscapedTableName);
+        else
+            logger.LogInformation("Table cleanup status. Table: {Table}, Missing: 1, Dropped: 0, Failed: 0", result.EscapedTableName);
+    }
 
     protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
         => $"{symbol}-{interval}-{closeTime:s}";

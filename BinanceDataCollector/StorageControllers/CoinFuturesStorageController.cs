@@ -31,6 +31,30 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
     protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, "CoinFutures"); } }
     protected override bool IsFutures => true;
 
+    protected override string GetSymbolName(BinanceFuturesCoinSymbolInfo symbol)
+        => symbol.Name;
+
+    protected override Task<List<string>> GetExistingSymbolNamesAsync(BinanceDbContext db, CancellationToken ct = default)
+        => db.BinanceFuturesCoinSymbolInfos.AsNoTracking().Select(item => item.Name).ToListAsync(ct);
+
+    protected override async Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
+    {
+        await db.DropShardingTablesAsync(delistedSymbols,
+        [
+            typeof(FuturesCoinBinanceKline).Name,
+            typeof(FuturesCoinBinancePremiumIndexKline).Name,
+            typeof(FuturesCoinBinanceIndexPriceKline).Name,
+            typeof(FuturesCoinBinanceMarkPriceKline).Name,
+            typeof(FuturesCoinFundingRate).Name,
+            typeof(FuturesCoinOpenInterestHistory).Name,
+            typeof(FuturesCoinTopLongShortPositionRatio).Name,
+            typeof(FuturesCoinTopLongShortAccountRatio).Name,
+            typeof(FuturesCoinGlobalLongShortAccountRatio).Name,
+        ], LogDropStatus, ct);
+
+        await db.BinanceFuturesCoinSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
+    }
+
     public override async Task DeleteOldData(CancellationToken ct = default)
     {
         using IServiceScope scope = serviceProvider.CreateScope();
