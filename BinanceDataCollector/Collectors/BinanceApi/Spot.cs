@@ -8,7 +8,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
     {
         public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         {
-            DateTime endTime = DateTime.Today;
+            DateTime endTime = DateTime.UtcNow;
             List<ApiKline> klines = [];
             while (startTime < endTime)
             {
@@ -25,7 +25,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                     return Result.Fail(result.Error!.Message);
                 if (result.Data!.Length == 0)
                     break;
-                startTime = result.Data.Last().CloseTime;
+                startTime = result.Data.Last().CloseTime.AddSeconds(1);
                 klines.AddRange(result.Data);
             }
             return Result.Ok(klines);

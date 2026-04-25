@@ -9,7 +9,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
 {
     public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.Today;
+        DateTime endTime = DateTime.UtcNow;
         List<ApiKline> klines = [];
         while (startTime < endTime)
         {
@@ -24,7 +24,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -32,7 +32,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
 
     public override async Task<Result<List<BinanceMarkIndexKline>>> GetIndexPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.Today;
+        DateTime endTime = DateTime.UtcNow;
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
@@ -47,7 +47,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -55,7 +55,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
 
     public override async Task<Result<List<BinanceMarkIndexKline>>> GetMarkPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.Today;
+        DateTime endTime = DateTime.UtcNow;
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
@@ -70,7 +70,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -78,7 +78,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
 
     public override async Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.Today;
+        DateTime endTime = DateTime.UtcNow;
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
@@ -93,7 +93,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -132,7 +132,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().FundingTime : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? result.Data.Last().FundingTime.AddSeconds(1) : startTime.AddDays(200);
             fundingRates.AddRange(result.Data);
         }
         return Result.Ok(fundingRates);
@@ -147,7 +147,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceFuturesCoinOpenInterestHistory[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(pair, contractType, PeriodInterval.FiveMinutes, 500, startTime, endTime, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(pair, contractType, PeriodInterval.FiveMinutes, 499, startTime, endTime, ct);
             }
             catch (Exception ex)
             {
@@ -156,7 +156,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesCoinOpenInterestHistory[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
             openInterestHistories.AddRange(validData);
         }
 
@@ -172,7 +172,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetTopLongShortPositionRatioAsync(pair, PeriodInterval.FiveMinutes, 500, startTime, endTime, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetTopLongShortPositionRatioAsync(pair, PeriodInterval.FiveMinutes, 499, startTime, endTime, ct);
             }
             catch (Exception ex)
             {
@@ -181,7 +181,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -196,7 +196,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetTopLongShortAccountRatioAsync(pair, PeriodInterval.FiveMinutes, 500, startTime, endTime, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetTopLongShortAccountRatioAsync(pair, PeriodInterval.FiveMinutes, 499, startTime, endTime, ct);
             }
             catch (Exception ex)
             {
@@ -205,7 +205,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -220,7 +220,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetGlobalLongShortAccountRatioAsync(pair, PeriodInterval.FiveMinutes, 500, startTime, endTime, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetGlobalLongShortAccountRatioAsync(pair, PeriodInterval.FiveMinutes, 499, startTime, endTime, ct);
             }
             catch (Exception ex)
             {
@@ -229,7 +229,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
