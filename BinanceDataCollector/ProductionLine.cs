@@ -88,7 +88,7 @@ internal class ProductionLine
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "GetLastTimeProcessAsync error");
+                    logger.LogError(ex, "GetLastTimeProcessAsync error. WorkItem: {WorkItem}", item.Description);
                 }
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
@@ -109,7 +109,7 @@ internal class ProductionLine
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "GatherKlineProcessAsync error");
+                    logger.LogError(ex, "GatherKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
                 }
             }
             logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
@@ -132,7 +132,7 @@ internal class ProductionLine
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "InsertKlineProcessAsync error");
+                    logger.LogError(ex, "InsertKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
                 }
                 lock (lastProcessState[index].Lock)
                     lastProcessState[index].State = false;
@@ -162,7 +162,7 @@ internal class ProductionLine
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "DeleteKlineProcessAsync error");
+                    logger.LogError(ex, "DeleteKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
                 }
                 lock (deleteProcessState[index].Lock)
                     deleteProcessState[index].State = false;

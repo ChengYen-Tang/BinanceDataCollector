@@ -1,5 +1,4 @@
 using CollectorModels.Models;
-using Microsoft.Data.SqlClient;
 using ShardingCore.Core.EntityMetadatas;
 using ShardingCore.Core.VirtualDatabase.VirtualDataSources;
 using ShardingCore.Core.VirtualRoutes;
@@ -7,9 +6,9 @@ using ShardingCore.Core.VirtualRoutes.DataSourceRoutes.RouteRuleEngine;
 using ShardingCore.Core.VirtualRoutes.TableRoutes.Abstractions;
 using ShardingCore.TableCreator;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Threading;
 
 namespace CollectorModels.ShardingCore;
 
@@ -18,52 +17,15 @@ public abstract class FuturesFundingRateTableRoute<TFundingRate> : AbstractShard
 {
     private readonly IShardingTableCreator tableCreator;
     private readonly IVirtualDataSource virtualDataSource;
-    private readonly HashSet<string> tails;
-    private readonly ReaderWriterLockSlim tailsLock;
+    private readonly ConcurrentDictionary<string, byte> tails;
     private readonly string currentTableName;
-
-    private const string Tables = "Tables";
-    private const string TABLE_SCHEMA = "TABLE_SCHEMA";
-    private const string TABLE_NAME = "TABLE_NAME";
 
     protected FuturesFundingRateTableRoute(IShardingTableCreator tableCreator, IVirtualDataSource virtualDataSource)
     {
-        currentTableName = typeof(TFundingRate).Name;
-        tails = [];
-        tailsLock = new(LockRecursionPolicy.SupportsRecursion);
+        currentTableName = ShardingTableRouteHelper.GetLogicalTableName<TFundingRate>();
+        tails = ShardingTableRouteHelper.GetOrCreateTailCache(virtualDataSource.DefaultConnectionString, currentTableName);
         this.tableCreator = tableCreator;
         this.virtualDataSource = virtualDataSource;
-        InitTails();
-    }
-
-    private void InitTails()
-    {
-        using SqlConnection connection = new(virtualDataSource.DefaultConnectionString);
-        connection.Open();
-
-        using var dataTable = connection.GetSchema(Tables);
-
-        for (int i = 0; i < dataTable.Rows.Count; i++)
-        {
-            var schema = dataTable.Rows[i][TABLE_SCHEMA] as string;
-            if (!"dbo".Equals(schema, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            string tableName = dataTable.Rows[i][TABLE_NAME]?.ToString() ?? string.Empty;
-            if (!tableName.StartsWith(currentTableName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            tailsLock.EnterWriteLock();
-            try
-            {
-                tails.Add(tableName[(currentTableName.Length + 2)..]);
-            }
-            finally
-            {
-                if (tailsLock.IsWriteLockHeld)
-                    tailsLock.ExitWriteLock();
-            }
-        }
     }
 
     public override void Configure(EntityMetadataTableBuilder<TFundingRate> builder)
@@ -82,37 +44,12 @@ public abstract class FuturesFundingRateTableRoute<TFundingRate> : AbstractShard
     }
 
     public override List<string> GetTails()
-    {
-        tailsLock.EnterReadLock();
-        try
-        {
-            return [.. tails];
-        }
-        finally
-        {
-            if (tailsLock.IsReadLockHeld)
-                tailsLock.ExitReadLock();
-        }
-    }
+        => [.. tails.Keys];
 
     public override TableRouteUnit RouteWithValue(DataSourceRouteResult dataSourceRouteResult, object shardingKey)
     {
         string shardingKeyToTail = ShardingKeyToTail(shardingKey);
-        tailsLock.EnterWriteLock();
-        try
-        {
-            if (!tails.Contains(shardingKeyToTail))
-            {
-                tableCreator.CreateTable<TFundingRate>(virtualDataSource.DefaultDataSourceName, shardingKeyToTail);
-                tails.Add(shardingKeyToTail);
-            }
-        }
-        finally
-        {
-            if (tailsLock.IsWriteLockHeld)
-                tailsLock.ExitWriteLock();
-        }
-
+        ShardingTableRouteHelper.EnsureTableTail<TFundingRate>(tableCreator, virtualDataSource.DefaultConnectionString, virtualDataSource.DefaultDataSourceName, currentTableName, tails, shardingKeyToTail);
         return base.RouteWithValue(dataSourceRouteResult, shardingKey);
     }
 

@@ -95,12 +95,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T1>>> UpdateKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T1).Name} {symbol} {interval} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T1).Name, symbol, interval, startTime);
         Result<List<T1>> result = await GetKlinesAsync(symbol, interval, startTime, ct);
-        logger.LogDebug($"Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T1).Name, symbol, interval, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T1).Name, symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new(InsertKlinesAsync, [], ct);
@@ -111,12 +111,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T3>>> UpdateIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T3).Name} IndexPrice {symbol} {interval} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T3).Name, symbol, interval, startTime);
         Result<List<T3>> result = await GetIndexPriceKlinesAsync(symbol, interval, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T3).Name, symbol, interval, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T3).Name, symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new(InsertKlinesAsync, [], ct);
@@ -127,12 +127,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T4>>> UpdateMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T4).Name} MarkPrice {symbol} {interval} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T4).Name, symbol, interval, startTime);
         Result<List<T4>> result = await GetMarkPriceKlinesAsync(symbol, interval, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T4).Name, symbol, interval, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T4).Name, symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new(InsertKlinesAsync, [], ct);
@@ -143,12 +143,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T2>>> UpdatePremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T2).Name} {symbol} {interval} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T2).Name, symbol, interval, startTime);
         Result<List<T2>> result = await GetPremiumIndexKlinesAsync(symbol, interval, startTime, ct);
-        logger.LogDebug($"Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", typeof(T2).Name, symbol, interval, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Interval: {interval}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T2).Name, symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new(InsertKlinesAsync, [], ct);
@@ -159,12 +159,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T5>>> UpdateFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T5).Name} {symbol} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T5).Name, symbol, startTime);
         Result<List<T5>> result = await GetFundingRatesAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T5).Name, symbol, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T5).Name, symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<IList<T5>>(InsertFundingRatesAsync, [], ct);
@@ -175,12 +175,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T6>>> UpdateOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T6).Name} {symbol} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T6).Name, symbol, startTime);
         Result<List<T6>> result = await GetOpenInterestHistoriesAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T6).Name, symbol, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T6).Name, symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<IList<T6>>(InsertOpenInterestHistoriesAsync, [], ct);
@@ -191,12 +191,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T7>>> UpdateTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T7).Name} {symbol} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T7).Name, symbol, startTime);
         Result<List<T7>> result = await GetTopLongShortPositionRatiosAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T7).Name, symbol, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T7).Name, symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<IList<T7>>(InsertLongShortRatiosAsync, [], ct);
@@ -207,12 +207,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T8>>> UpdateTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T8).Name} {symbol} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T8).Name, symbol, startTime);
         Result<List<T8>> result = await GetTopLongShortAccountRatiosAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T8).Name, symbol, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T8).Name, symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<IList<T8>>(InsertLongShortRatiosAsync, [], ct);
@@ -223,12 +223,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task<AsyncWorkItem<IList<T9>>> UpdateGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug($"Start getting {typeof(T9).Name} {symbol} {startTime}...");
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T9).Name, symbol, startTime);
         Result<List<T9>> result = await GetGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting.");
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T9).Name, symbol, startTime);
         if (result.IsFailed)
         {
-            logger.LogError($"Symbol:{symbol}, Message: {result.Errors[0].Message}");
+            LogSyncFailure(typeof(T9).Name, symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<IList<T9>>(InsertLongShortRatiosAsync, [], ct);
@@ -236,6 +236,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
         return new AsyncWorkItem<IList<T9>>(InsertLongShortRatiosAsync, result.Value, ct);
     }
+
+    protected void LogSyncFailure(string dataType, T symbol, string message, KlineInterval? interval = null, DateTime? startTime = null)
+        => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
+            dataType, symbol, interval, startTime, message);
+
+    protected void LogCsvExportFailure(string dataType, string symbol, string message)
+        => logger.LogError("Csv export failed. DataType: {DataType}, Symbol: {Symbol}, Message: {Message}",
+            dataType, symbol, message);
 
     public async Task ExportToCsvAsync(CancellationToken ct = default)
     {
@@ -256,7 +264,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<Kline[]> klinesResult = await GetCsvKlinesAsync(symbol, ct);
             if (klinesResult.IsFailed)
             {
-                logger.LogError(klinesResult.Errors[0].Message);
+                LogCsvExportFailure(nameof(Kline), symbol, klinesResult.Errors[0].Message);
                 return;
             }
 
@@ -277,7 +285,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<PremiumIndexKline[]> premiumIndexKlinesResult = await GetCsvPremiumIndexKlinesAsync(symbol, ct);
             if (premiumIndexKlinesResult.IsFailed)
             {
-                logger.LogError(premiumIndexKlinesResult.Errors[0].Message);
+                LogCsvExportFailure(nameof(PremiumIndexKline), symbol, premiumIndexKlinesResult.Errors[0].Message);
                 return;
             }
 
@@ -295,7 +303,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<PremiumIndexKline[]> indexPriceKlinesResult = await GetCsvIndexPriceKlinesAsync(symbol, ct);
             if (indexPriceKlinesResult.IsFailed)
             {
-                logger.LogError(indexPriceKlinesResult.Errors[0].Message);
+                LogCsvExportFailure("IndexPriceKline", symbol, indexPriceKlinesResult.Errors[0].Message);
                 return;
             }
 
@@ -313,7 +321,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<PremiumIndexKline[]> markPriceKlinesResult = await GetCsvMarkPriceKlinesAsync(symbol, ct);
             if (markPriceKlinesResult.IsFailed)
             {
-                logger.LogError(markPriceKlinesResult.Errors[0].Message);
+                LogCsvExportFailure("MarkPriceKline", symbol, markPriceKlinesResult.Errors[0].Message);
                 return;
             }
 
@@ -331,7 +339,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<FundingRate[]> fundingRateResult = await GetCsvFundingRatesAsync(symbol, ct);
             if (fundingRateResult.IsFailed)
             {
-                logger.LogError(fundingRateResult.Errors[0].Message);
+                LogCsvExportFailure(nameof(FundingRate), symbol, fundingRateResult.Errors[0].Message);
                 return;
             }
 
@@ -349,7 +357,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<OpenInterestHistory[]> openInterestResult = await GetCsvOpenInterestHistoriesAsync(symbol, ct);
             if (openInterestResult.IsFailed)
             {
-                logger.LogError(openInterestResult.Errors[0].Message);
+                LogCsvExportFailure(nameof(OpenInterestHistory), symbol, openInterestResult.Errors[0].Message);
                 return;
             }
 
@@ -367,7 +375,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<LongShortRatioCsv[]> ratioResult = await GetCsvTopLongShortPositionRatiosAsync(symbol, ct);
             if (ratioResult.IsFailed)
             {
-                logger.LogError(ratioResult.Errors[0].Message);
+                LogCsvExportFailure("TopLongShortPositionRatio", symbol, ratioResult.Errors[0].Message);
                 return;
             }
 
@@ -385,7 +393,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<LongShortRatioCsv[]> ratioResult = await GetCsvTopLongShortAccountRatiosAsync(symbol, ct);
             if (ratioResult.IsFailed)
             {
-                logger.LogError(ratioResult.Errors[0].Message);
+                LogCsvExportFailure("TopLongShortAccountRatio", symbol, ratioResult.Errors[0].Message);
                 return;
             }
 
@@ -403,7 +411,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             Result<LongShortRatioCsv[]> ratioResult = await GetCsvGlobalLongShortAccountRatiosAsync(symbol, ct);
             if (ratioResult.IsFailed)
             {
-                logger.LogError(ratioResult.Errors[0].Message);
+                LogCsvExportFailure("GlobalLongShortAccountRatio", symbol, ratioResult.Errors[0].Message);
                 return;
             }
 

@@ -7,9 +7,11 @@ namespace BinanceDataCollector.Collectors.BinanceApi;
 
 internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : BaseTrade<BinanceFuturesUsdtSymbol>(client)
 {
+    private static readonly TimeSpan MaxPositionDataLookback = TimeSpan.FromDays(29);
+
     public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        DateTime endTime = DateTime.Today;
         List<ApiKline> klines = [];
         while (startTime < endTime)
         {
@@ -32,7 +34,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public override async Task<Result<List<BinanceMarkIndexKline>>> GetIndexPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        DateTime endTime = DateTime.Today;
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
@@ -63,7 +65,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public override async Task<Result<List<BinanceMarkIndexKline>>> GetMarkPriceKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        DateTime endTime = DateTime.Today;
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
@@ -86,7 +88,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public override async Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        DateTime endTime = DateTime.Today;
         List<BinanceMarkIndexKline> klines = [];
         while (startTime < endTime)
         {
@@ -125,7 +127,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesFundingRateHistory>>> GetFundingRatesAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        DateTime endTime = DateTime.Today;
         List<BinanceFuturesFundingRateHistory> fundingRates = [];
         while (startTime < endTime)
         {
@@ -148,7 +150,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesOpenInterestHistory>>> GetOpenInterestHistoryAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        startTime = ClampRestrictedStartTime(startTime);
+        DateTime endTime = DateTime.Today;
         List<BinanceFuturesOpenInterestHistory> openInterestHistories = [];
         while (startTime < endTime)
         {
@@ -173,7 +176,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesLongShortRatio>>> GetTopLongShortPositionRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        startTime = ClampRestrictedStartTime(startTime);
+        DateTime endTime = DateTime.Today;
         List<BinanceFuturesLongShortRatio> ratios = [];
         while (startTime < endTime)
         {
@@ -197,7 +201,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesLongShortRatio>>> GetTopLongShortAccountRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        startTime = ClampRestrictedStartTime(startTime);
+        DateTime endTime = DateTime.Today;
         List<BinanceFuturesLongShortRatio> ratios = [];
         while (startTime < endTime)
         {
@@ -221,7 +226,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesLongShortRatio>>> GetGlobalLongShortAccountRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        DateTime endTime = DateTime.UtcNow;
+        startTime = ClampRestrictedStartTime(startTime);
+        DateTime endTime = DateTime.Today;
         List<BinanceFuturesLongShortRatio> ratios = [];
         while (startTime < endTime)
         {
@@ -241,5 +247,11 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
+    }
+
+    private static DateTime ClampRestrictedStartTime(DateTime startTime)
+    {
+        DateTime minStartTime = DateTime.Today.Subtract(MaxPositionDataLookback);
+        return startTime < minStartTime ? minStartTime : startTime;
     }
 }

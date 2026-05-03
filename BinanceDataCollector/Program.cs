@@ -26,12 +26,14 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<ProductionLine>();
 
         services.AddBinance(x =>
-            {
-                x.Rest.RateLimiterEnabled = true;
-                x.Rest.RateLimitingBehaviour = RateLimitingBehaviour.Wait;
-                x.Socket.RateLimiterEnabled = true;
-                x.Socket.RateLimitingBehaviour = RateLimitingBehaviour.Wait;
-            });
+        {
+            x.Rest.OutputOriginalData = true;
+            x.Rest.RateLimiterEnabled = true;
+            x.Rest.RateLimitingBehaviour = RateLimitingBehaviour.Wait;
+            x.Socket.OutputOriginalData = true;
+            x.Socket.RateLimiterEnabled = true;
+            x.Socket.RateLimitingBehaviour = RateLimitingBehaviour.Wait;
+        });
         services.AddScoped<ICollectorController, SpotCollectorController>();
         services.AddScoped<ICollectorController, CoinFuturesCollectorController>();
         services.AddScoped<ICollectorController, UsdFuturesCollectorController>();
