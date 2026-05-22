@@ -19,7 +19,9 @@ public class BinanceFuturesUsdtSymbolInfo : BinanceFuturesSymbolInfo
     public List<FuturesUsdtBinanceMarkPriceKline> BinanceMarkPriceKlines { get; set; }
     public List<FuturesUsdtFundingRate> FundingRates { get; set; }
     public List<FuturesUsdtOpenInterestHistory> OpenInterestHistories { get; set; }
+    public List<FuturesUsdtBasis> BasisHistories { get; set; }
     public List<FuturesUsdtTopLongShortPositionRatio> TopLongShortPositionRatios { get; set; }
     public List<FuturesUsdtTopLongShortAccountRatio> TopLongShortAccountRatios { get; set; }
     public List<FuturesUsdtGlobalLongShortAccountRatio> GlobalLongShortAccountRatios { get; set; }
+    public List<FuturesUsdtTakerLongShortRatio> TakerLongShortRatios { get; set; }
 }

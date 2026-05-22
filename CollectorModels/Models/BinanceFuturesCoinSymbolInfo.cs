@@ -24,7 +24,9 @@ public class BinanceFuturesCoinSymbolInfo : BinanceFuturesSymbolInfo
     public List<FuturesCoinBinanceMarkPriceKline> BinanceMarkPriceKlines { get; set; }
     public List<FuturesCoinFundingRate> FundingRates { get; set; }
     public List<FuturesCoinOpenInterestHistory> OpenInterestHistories { get; set; }
+    public List<FuturesCoinBasis> BasisHistories { get; set; }
     public List<FuturesCoinTopLongShortPositionRatio> TopLongShortPositionRatios { get; set; }
     public List<FuturesCoinTopLongShortAccountRatio> TopLongShortAccountRatios { get; set; }
     public List<FuturesCoinGlobalLongShortAccountRatio> GlobalLongShortAccountRatios { get; set; }
+    public List<FuturesCoinTakerLongShortRatio> TakerLongShortRatios { get; set; }
 }

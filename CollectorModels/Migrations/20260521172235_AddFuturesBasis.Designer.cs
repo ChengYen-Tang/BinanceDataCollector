@@ -4,6 +4,7 @@ using CollectorModels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CollectorModels.Migrations
 {
     [DbContext(typeof(BinanceDbContext))]
-    partial class BinanceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260521172235_AddFuturesBasis")]
+    partial class AddFuturesBasis
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1177,7 +1180,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("BasisHistories")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1187,7 +1190,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceIndexPriceKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1197,7 +1200,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1207,7 +1210,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceMarkPriceKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1217,7 +1220,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("BinancePremiumIndexKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1227,7 +1230,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("FundingRates")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1237,7 +1240,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("GlobalLongShortAccountRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1247,7 +1250,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("OpenInterestHistories")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1257,7 +1260,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("TakerLongShortRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1267,7 +1270,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("TopLongShortAccountRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1277,7 +1280,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesCoinSymbolInfo", "SymbolInfo")
                         .WithMany("TopLongShortPositionRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1287,7 +1290,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("BasisHistories")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1297,7 +1300,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceIndexPriceKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1307,7 +1310,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1317,7 +1320,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("BinanceMarkPriceKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1327,7 +1330,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("BinancePremiumIndexKlines")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1337,7 +1340,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("FundingRates")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1347,7 +1350,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("GlobalLongShortAccountRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1357,7 +1360,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("OpenInterestHistories")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1367,7 +1370,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("TakerLongShortRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1377,7 +1380,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("TopLongShortAccountRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });
@@ -1387,7 +1390,7 @@ namespace CollectorModels.Migrations
                     b.HasOne("CollectorModels.Models.BinanceFuturesUsdtSymbolInfo", "SymbolInfo")
                         .WithMany("TopLongShortPositionRatios")
                         .HasForeignKey("SymbolInfoId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("SymbolInfo");
                 });

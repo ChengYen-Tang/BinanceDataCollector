@@ -67,3 +67,39 @@ public class FuturesCoinGlobalLongShortAccountRatio : FuturesLongShortRatio
 {
     public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
 }
+
+public abstract class FuturesTakerLongShortRatio
+{
+    [Key]
+    public string Id { get; set; }
+
+    public DateTime Timestamp { get; set; }
+
+    public double? BuySellRatio { get; set; }
+
+    public double BuyVolume { get; set; }
+
+    public double SellVolume { get; set; }
+
+    public double? BuyVolumeValue { get; set; }
+
+    public double? SellVolumeValue { get; set; }
+
+    public string SymbolInfoId { get; set; }
+}
+
+[Index(nameof(Timestamp))]
+[Index(nameof(SymbolInfoId))]
+[Index(nameof(Timestamp), nameof(SymbolInfoId))]
+public class FuturesUsdtTakerLongShortRatio : FuturesTakerLongShortRatio
+{
+    public BinanceFuturesUsdtSymbolInfo SymbolInfo { get; set; }
+}
+
+[Index(nameof(Timestamp))]
+[Index(nameof(SymbolInfoId))]
+[Index(nameof(Timestamp), nameof(SymbolInfoId))]
+public class FuturesCoinTakerLongShortRatio : FuturesTakerLongShortRatio
+{
+    public BinanceFuturesCoinSymbolInfo SymbolInfo { get; set; }
+}

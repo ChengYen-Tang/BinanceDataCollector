@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, FuturesFundingRate, FuturesOpenInterestHistory, FuturesLongShortRatio, FuturesLongShortRatio, FuturesLongShortRatio>
+internal class SpotStorageController : StorageController<BinanceSymbolInfo, SpotBinanceKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, CollectorModels.Models.BinanceMarkIndexKline, FuturesFundingRate, FuturesOpenInterestHistory, FuturesLongShortRatio, FuturesLongShortRatio, FuturesLongShortRatio, FuturesTakerLongShortRatio, FuturesBasis>
 {
     private readonly Spot spot;
 
@@ -29,6 +29,8 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override string TopLongShortPositionRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
     protected override string TopLongShortAccountRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
     protected override string GlobalLongShortAccountRatioPath => throw new NotSupportedException("Spot market does not support long/short ratios.");
+    protected override string TakerLongShortRatioPath => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
+    protected override string BasisPath => throw new NotSupportedException("Spot market does not support basis.");
     protected override bool IsFutures => false;
 
     protected override string GetSymbolName(BinanceSymbolInfo symbol)
@@ -39,7 +41,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
     protected override async Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        await db.DropShardingTablesAsync(delistedSymbols, [typeof(SpotBinanceKline).Name], LogDropStatus, ct);
+        await db.DropShardingTablesAsync(delistedSymbols, [nameof(BinanceDbContext.SpotBinanceKlines)], LogDropStatus, ct);
 
         await db.BinanceSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
     }
@@ -49,7 +51,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        
+
         // 只取得 symbol 名稱，不載入完整的 entity
         List<string> symbolNames = await db.BinanceSymbolInfos
             .AsNoTracking()
@@ -113,6 +115,12 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
     public override Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    public override Task<DateTime> GetLastTakerLongShortRatioTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
+
+    public override Task<DateTime> GetLastBasisTimeAsync(BinanceSymbolInfo symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support basis.");
 
     protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
     {
@@ -198,6 +206,12 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override Task<Result<List<FuturesLongShortRatio>>> GetGlobalLongShortAccountRatiosAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support long/short ratios.");
 
+    protected override Task<Result<List<FuturesTakerLongShortRatio>>> GetTakerLongShortRatiosAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
+
+    protected override Task<Result<List<FuturesBasis>>> GetBasisAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support basis.");
+
     protected override async Task<Result<List<BinanceSymbolInfo>>> GetMarketAsync(CancellationToken ct = default)
     {
         Result<IEnumerable<BinanceSymbol>> result = await spot.GetMarketAsync(ct);
@@ -250,4 +264,10 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
 
     protected override Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support long/short ratios.");
+
+    protected override Task<Result<TakerLongShortRatioCsv[]>> GetCsvTakerLongShortRatiosAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
+
+    protected override Task<Result<FuturesBasisCsv[]>> GetCsvBasisAsync(string symbol, CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support basis.");
 }

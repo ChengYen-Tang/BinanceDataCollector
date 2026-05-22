@@ -13,12 +13,14 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        productionLine.Start();
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider scopeServiceProvider = scope.ServiceProvider;
         using BinanceDbContext db = scopeServiceProvider.GetRequiredService<BinanceDbContext>();
+        _ = db.Model;
         if (db.Database.GetPendingMigrations().Any())
             db.Database.Migrate();
+        _ = db.Model;
+        productionLine.Start();
         GlobalConfiguration.Configuration
                 .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
                 .UseColouredConsoleLogProvider()
@@ -78,10 +80,16 @@ public class HangfireJob
         foreach (ICollectorController controller in controllers)
             await controller.GatherAsync(ct);
         ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
+        logger.LogInformation("Waiting for production line to finish at: {time}", DateTimeOffset.Now);
         productionLine.Wait();
+        logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
         productionLine.ResetEvent();
         foreach (ICollectorController controller in controllers)
+        {
+            logger.LogInformation("Start exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
             await controller.ExportToCsvAsync(ct);
+            logger.LogInformation("Finish exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+        }
         isRunning = false;
         logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
     }

@@ -11,7 +11,7 @@ using System.Diagnostics;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
+internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>
     where T : class
     where T1 : BinanceKline
     where T2 : BinanceMarkIndexKline
@@ -22,6 +22,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     where T7 : FuturesLongShortRatio
     where T8 : FuturesLongShortRatio
     where T9 : FuturesLongShortRatio
+    where T10 : FuturesTakerLongShortRatio
+    where T11 : FuturesBasis
 {
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
@@ -37,6 +39,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     protected static string RootTopLongShortPositionRatioPath = Path.Combine(DataPath, "TopLongShortPositionRatio");
     protected static string RootTopLongShortAccountRatioPath = Path.Combine(DataPath, "TopLongShortAccountRatio");
     protected static string RootGlobalLongShortAccountRatioPath = Path.Combine(DataPath, "GlobalLongShortAccountRatio");
+    protected static string RootTakerLongShortRatioPath = Path.Combine(DataPath, "TakerLongShortRatio");
+    protected static string RootBasisPath = Path.Combine(DataPath, "Basis");
     protected abstract string KlinePath { get; }
     protected abstract string PremiumIndexKlinePath { get; }
     protected abstract string IndexPriceKlinePath { get; }
@@ -46,6 +50,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     protected abstract string TopLongShortPositionRatioPath { get; }
     protected abstract string TopLongShortAccountRatioPath { get; }
     protected abstract string GlobalLongShortAccountRatioPath { get; }
+    protected abstract string TakerLongShortRatioPath { get; }
+    protected abstract string BasisPath { get; }
     protected abstract bool IsFutures { get; }
 
     public StorageController(IServiceProvider serviceProvider, ILogger logger)
@@ -237,6 +243,38 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
         return new AsyncWorkItem<IList<T9>>(InsertLongShortRatiosAsync, result.Value, ct);
     }
 
+    public async Task<AsyncWorkItem<IList<T10>>> UpdateTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T10).Name, symbol, startTime);
+        Result<List<T10>> result = await GetTakerLongShortRatiosAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T10).Name, symbol, startTime);
+        if (result.IsFailed)
+        {
+            LogSyncFailure(typeof(T10).Name, symbol, result.Errors[0].Message, startTime: startTime);
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<IList<T10>>(InsertTakerLongShortRatiosAsync, [], ct);
+        }
+
+        return new AsyncWorkItem<IList<T10>>(InsertTakerLongShortRatiosAsync, result.Value, ct);
+    }
+
+    public async Task<AsyncWorkItem<IList<T11>>> UpdateBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T11).Name, symbol, startTime);
+        Result<List<T11>> result = await GetBasisAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", typeof(T11).Name, symbol, startTime);
+        if (result.IsFailed)
+        {
+            LogSyncFailure(typeof(T11).Name, symbol, result.Errors[0].Message, startTime: startTime);
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<IList<T11>>(InsertBasisAsync, [], ct);
+        }
+
+        return new AsyncWorkItem<IList<T11>>(InsertBasisAsync, result.Value, ct);
+    }
+
     protected void LogSyncFailure(string dataType, T symbol, string message, KlineInterval? interval = null, DateTime? startTime = null)
         => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
             dataType, symbol, interval, startTime, message);
@@ -247,6 +285,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public async Task ExportToCsvAsync(CancellationToken ct = default)
     {
+        logger.LogInformation("Start csv export. StorageController: {StorageController}", GetType().Name);
         Result<string[]> symbolNamesResult = await GetAllSymbolNamesAsync(ct);
         if (symbolNamesResult.IsFailed)
         {
@@ -254,9 +293,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             return;
         }
 
+        logger.LogInformation("Csv export symbols loaded. StorageController: {StorageController}, SymbolCount: {SymbolCount}", GetType().Name, symbolNamesResult.Value.Length);
+
         if (Directory.Exists(KlinePath))
             Directory.Delete(KlinePath, true);
         Directory.CreateDirectory(KlinePath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(Kline));
 
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
@@ -272,13 +314,18 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(path, klinesResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(Kline));
 
         if (!IsFutures)
+        {
+            logger.LogInformation("Finish csv export. StorageController: {StorageController}", GetType().Name);
             return;
+        }
 
         if (Directory.Exists(PremiumIndexKlinePath))
             Directory.Delete(PremiumIndexKlinePath, true);
         Directory.CreateDirectory(PremiumIndexKlinePath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(PremiumIndexKline));
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -293,10 +340,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(premiumIndexPath, premiumIndexKlinesResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(PremiumIndexKline));
 
         if (Directory.Exists(IndexPriceKlinePath))
             Directory.Delete(IndexPriceKlinePath, true);
         Directory.CreateDirectory(IndexPriceKlinePath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: IndexPriceKline", GetType().Name);
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -311,10 +360,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(indexPricePath, indexPriceKlinesResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: IndexPriceKline", GetType().Name);
 
         if (Directory.Exists(MarkPriceKlinePath))
             Directory.Delete(MarkPriceKlinePath, true);
         Directory.CreateDirectory(MarkPriceKlinePath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: MarkPriceKline", GetType().Name);
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -329,10 +380,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(markPricePath, markPriceKlinesResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: MarkPriceKline", GetType().Name);
 
         if (Directory.Exists(FundingRatePath))
             Directory.Delete(FundingRatePath, true);
         Directory.CreateDirectory(FundingRatePath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(FundingRate));
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -347,10 +400,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(fundingRatePath, fundingRateResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(FundingRate));
 
         if (Directory.Exists(OpenInterestPath))
             Directory.Delete(OpenInterestPath, true);
         Directory.CreateDirectory(OpenInterestPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(OpenInterestHistory));
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -365,10 +420,32 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(openInterestPath, openInterestResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(OpenInterestHistory));
+
+        if (Directory.Exists(BasisPath))
+            Directory.Delete(BasisPath, true);
+        Directory.CreateDirectory(BasisPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: Basis", GetType().Name);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<FuturesBasisCsv[]> basisResult = await GetCsvBasisAsync(symbol, ct);
+            if (basisResult.IsFailed)
+            {
+                LogCsvExportFailure("Basis", symbol, basisResult.Errors[0].Message);
+                return;
+            }
+
+            string basisPath = Path.Combine(BasisPath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(basisPath, basisResult.Value);
+        });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: Basis", GetType().Name);
 
         if (Directory.Exists(TopLongShortPositionRatioPath))
             Directory.Delete(TopLongShortPositionRatioPath, true);
         Directory.CreateDirectory(TopLongShortPositionRatioPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: TopLongShortPositionRatio", GetType().Name);
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -383,10 +460,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(ratioPath, ratioResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: TopLongShortPositionRatio", GetType().Name);
 
         if (Directory.Exists(TopLongShortAccountRatioPath))
             Directory.Delete(TopLongShortAccountRatioPath, true);
         Directory.CreateDirectory(TopLongShortAccountRatioPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: TopLongShortAccountRatio", GetType().Name);
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -401,10 +480,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(ratioPath, ratioResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: TopLongShortAccountRatio", GetType().Name);
 
         if (Directory.Exists(GlobalLongShortAccountRatioPath))
             Directory.Delete(GlobalLongShortAccountRatioPath, true);
         Directory.CreateDirectory(GlobalLongShortAccountRatioPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: GlobalLongShortAccountRatio", GetType().Name);
 
         await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
         {
@@ -419,6 +500,28 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
             CsvExporter exporter = new();
             await exporter.Export(ratioPath, ratioResult.Value);
         });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: GlobalLongShortAccountRatio", GetType().Name);
+
+        if (Directory.Exists(TakerLongShortRatioPath))
+            Directory.Delete(TakerLongShortRatioPath, true);
+        Directory.CreateDirectory(TakerLongShortRatioPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: TakerLongShortRatio", GetType().Name);
+
+        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
+        {
+            Result<TakerLongShortRatioCsv[]> ratioResult = await GetCsvTakerLongShortRatiosAsync(symbol, ct);
+            if (ratioResult.IsFailed)
+            {
+                LogCsvExportFailure("TakerLongShortRatio", symbol, ratioResult.Errors[0].Message);
+                return;
+            }
+
+            string ratioPath = Path.Combine(TakerLongShortRatioPath, $"{symbol}.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(ratioPath, ratioResult.Value);
+        });
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: TakerLongShortRatio", GetType().Name);
+        logger.LogInformation("Finish csv export. StorageController: {StorageController}", GetType().Name);
     }
 
     protected async Task InsertKlinesAsync<TKline>(IList<TKline> klines, CancellationToken ct = default)
@@ -466,6 +569,52 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
         catch (Exception ex)
         {
             logger.LogError($"Symbol: {ratios[0].SymbolInfoId}, Message: {ex.Message}");
+        }
+    }
+
+    protected async Task InsertTakerLongShortRatiosAsync(IList<T10> ratios, CancellationToken ct = default)
+    {
+        if (!ratios.Any())
+            return;
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        try
+        {
+            logger.LogDebug($"Start inserting {typeof(T10).Name} Count: {ratios.Count}...");
+            Dictionary<DbContext, IEnumerable<T10>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(ratios);
+            using IDbContextTransaction transaction = db.Database.BeginTransaction();
+            foreach (KeyValuePair<DbContext, IEnumerable<T10>> item in bulkShardingEnumerable)
+                await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            transaction.Commit();
+            logger.LogDebug("Finish inserting.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Symbol: {ratios[0].SymbolInfoId}, Message: {ex.Message}");
+        }
+    }
+
+    protected async Task InsertBasisAsync(IList<T11> histories, CancellationToken ct = default)
+    {
+        if (!histories.Any())
+            return;
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        try
+        {
+            logger.LogDebug($"Start inserting {typeof(T11).Name} Count: {histories.Count}...");
+            Dictionary<DbContext, IEnumerable<T11>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(histories);
+            using IDbContextTransaction transaction = db.Database.BeginTransaction();
+            foreach (KeyValuePair<DbContext, IEnumerable<T11>> item in bulkShardingEnumerable)
+                await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
+            transaction.Commit();
+            logger.LogDebug("Finish inserting.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Symbol: {histories[0].SymbolInfoId}, Message: {ex.Message}");
         }
     }
 
@@ -524,6 +673,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     public abstract Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(T symbol, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(T symbol, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(T symbol, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastTakerLongShortRatioTimeAsync(T symbol, CancellationToken ct = default);
+    public abstract Task<DateTime> GetLastBasisTimeAsync(T symbol, CancellationToken ct = default);
 
     public abstract Task DeleteOldData(CancellationToken ct = default);
 
@@ -542,6 +693,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     protected abstract Task<Result<List<T7>>> GetTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T8>>> GetTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T9>>> GetGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T10>>> GetTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<List<T11>>> GetBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected abstract Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default);
 
@@ -555,6 +708,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9>
     protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default);
     protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
     protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<TakerLongShortRatioCsv[]>> GetCsvTakerLongShortRatiosAsync(string symbol, CancellationToken ct = default);
+    protected abstract Task<Result<FuturesBasisCsv[]>> GetCsvBasisAsync(string symbol, CancellationToken ct = default);
 
     protected void LogDropStatus(ShardingExtension.ShardingTableDropResult result)
     {
