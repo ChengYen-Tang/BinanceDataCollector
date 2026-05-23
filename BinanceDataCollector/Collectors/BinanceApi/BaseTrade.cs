@@ -7,6 +7,7 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
 {
     private static readonly TimeSpan MaxRestrictedApiLookback = TimeSpan.FromDays(29);
     private static readonly TimeSpan RestrictedApiPageWindow = TimeSpan.FromMinutes(499 * 5);
+    private static readonly TimeSpan RestrictedApiEndTimePadding = TimeSpan.FromMinutes(5);
 
     protected readonly IBinanceRestClient client = client;
 
@@ -19,7 +20,8 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
     protected static DateTime GetRestrictedEndTime(DateTime startTime, DateTime overallEndTime)
     {
         DateTime requestEndTime = startTime.Add(RestrictedApiPageWindow);
-        return requestEndTime < overallEndTime ? requestEndTime : overallEndTime;
+        DateTime effectiveOverallEndTime = overallEndTime.Add(RestrictedApiEndTimePadding);
+        return requestEndTime < effectiveOverallEndTime ? requestEndTime : effectiveOverallEndTime;
     }
 
     public abstract Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);

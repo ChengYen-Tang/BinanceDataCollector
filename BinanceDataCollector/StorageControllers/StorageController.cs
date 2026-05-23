@@ -283,6 +283,22 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         => logger.LogError("Csv export failed. DataType: {DataType}, Symbol: {Symbol}, Message: {Message}",
             dataType, symbol, message);
 
+    protected TEntity[] DeduplicateById<TEntity>(IList<TEntity> entities, Func<TEntity, string> getId)
+    {
+        if (entities.Count <= 1)
+            return [.. entities];
+
+        Dictionary<string, TEntity> uniqueEntities = [];
+        foreach (TEntity entity in entities)
+            uniqueEntities[getId(entity)] = entity;
+
+        if (uniqueEntities.Count != entities.Count)
+            logger.LogWarning("Deduplicated insert batch. DataType: {DataType}, OriginalCount: {OriginalCount}, UniqueCount: {UniqueCount}",
+                typeof(TEntity).Name, entities.Count, uniqueEntities.Count);
+
+        return [.. uniqueEntities.Values];
+    }
+
     public async Task ExportToCsvAsync(CancellationToken ct = default)
     {
         logger.LogInformation("Start csv export. StorageController: {StorageController}", GetType().Name);
@@ -529,13 +545,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     {
         if (!klines.Any())
             return;
+        TKline[] uniqueKlines = DeduplicateById(klines, item => item.Id);
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(TKline).Name} Count: {klines.Count}...");
-            Dictionary<DbContext, IEnumerable<TKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
+            logger.LogDebug($"Start inserting {typeof(TKline).Name} Count: {uniqueKlines.Length}...");
+            Dictionary<DbContext, IEnumerable<TKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(uniqueKlines);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<TKline>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
@@ -553,13 +570,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     {
         if (!ratios.Any())
             return;
+        TLongShortRatio[] uniqueRatios = DeduplicateById(ratios, item => item.Id);
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(TLongShortRatio).Name} Count: {ratios.Count}...");
-            Dictionary<DbContext, IEnumerable<TLongShortRatio>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(ratios);
+            logger.LogDebug($"Start inserting {typeof(TLongShortRatio).Name} Count: {uniqueRatios.Length}...");
+            Dictionary<DbContext, IEnumerable<TLongShortRatio>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(uniqueRatios);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<TLongShortRatio>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
@@ -576,13 +594,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     {
         if (!ratios.Any())
             return;
+        T10[] uniqueRatios = DeduplicateById(ratios, item => item.Id);
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(T10).Name} Count: {ratios.Count}...");
-            Dictionary<DbContext, IEnumerable<T10>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(ratios);
+            logger.LogDebug($"Start inserting {typeof(T10).Name} Count: {uniqueRatios.Length}...");
+            Dictionary<DbContext, IEnumerable<T10>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(uniqueRatios);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<T10>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
@@ -599,13 +618,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     {
         if (!histories.Any())
             return;
+        T11[] uniqueHistories = DeduplicateById(histories, item => item.Id);
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(T11).Name} Count: {histories.Count}...");
-            Dictionary<DbContext, IEnumerable<T11>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(histories);
+            logger.LogDebug($"Start inserting {typeof(T11).Name} Count: {uniqueHistories.Length}...");
+            Dictionary<DbContext, IEnumerable<T11>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(uniqueHistories);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<T11>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
@@ -622,13 +642,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     {
         if (!openInterestHistories.Any())
             return;
+        T6[] uniqueOpenInterestHistories = DeduplicateById(openInterestHistories, item => item.Id);
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(T6).Name} Count: {openInterestHistories.Count}...");
-            Dictionary<DbContext, IEnumerable<T6>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(openInterestHistories);
+            logger.LogDebug($"Start inserting {typeof(T6).Name} Count: {uniqueOpenInterestHistories.Length}...");
+            Dictionary<DbContext, IEnumerable<T6>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(uniqueOpenInterestHistories);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<T6>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
@@ -645,13 +666,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     {
         if (!rates.Any())
             return;
+        T5[] uniqueRates = DeduplicateById(rates, item => item.Id);
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
         try
         {
-            logger.LogDebug($"Start inserting {typeof(T5).Name} Count: {rates.Count}...");
-            Dictionary<DbContext, IEnumerable<T5>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(rates);
+            logger.LogDebug($"Start inserting {typeof(T5).Name} Count: {uniqueRates.Length}...");
+            Dictionary<DbContext, IEnumerable<T5>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(uniqueRates);
             using IDbContextTransaction transaction = db.Database.BeginTransaction();
             foreach (KeyValuePair<DbContext, IEnumerable<T5>> item in bulkShardingEnumerable)
                 await item.Key.BulkInsertOrUpdateAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);

@@ -64,8 +64,6 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         using IServiceScope scope = serviceProvider.CreateScope();
         IServiceProvider service = scope.ServiceProvider;
         using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-
-        // 只取得 symbol 名稱，不載入完整的 entity
         List<string> symbolNames = await db.BinanceFuturesCoinSymbolInfos
             .AsNoTracking()
             .Select(s => s.Name)
@@ -73,175 +71,17 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
 
         foreach (string symbolName in symbolNames)
         {
-            // 只查詢必要欄位：Id 和 SymbolInfoId (Sharding Key)
-            var klineMinimalData = await db.FuturesCoinBinanceKlines
-                .AsNoTracking()
-                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var premiumIndexMinimalData = await db.FuturesCoinBinancePremiumIndexKlines
-                .AsNoTracking()
-                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var indexPriceMinimalData = await db.FuturesCoinBinanceIndexPriceKlines
-                .AsNoTracking()
-                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var markPriceMinimalData = await db.FuturesCoinBinanceMarkPriceKlines
-                .AsNoTracking()
-                .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var fundingRateMinimalData = await db.FuturesCoinFundingRates
-                .AsNoTracking()
-                .Where(item => item.FundingTime < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var openInterestMinimalData = await db.FuturesCoinOpenInterestHistories
-                .AsNoTracking()
-                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var basisMinimalData = await db.FuturesCoinBasisHistories
-                .AsNoTracking()
-                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var topLongShortPositionRatioMinimalData = await db.FuturesCoinTopLongShortPositionRatios
-                .AsNoTracking()
-                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var topLongShortAccountRatioMinimalData = await db.FuturesCoinTopLongShortAccountRatios
-                .AsNoTracking()
-                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var globalLongShortAccountRatioMinimalData = await db.FuturesCoinGlobalLongShortAccountRatios
-                .AsNoTracking()
-                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            var takerLongShortRatioMinimalData = await db.FuturesCoinTakerLongShortRatios
-                .AsNoTracking()
-                .Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName)
-                .Select(item => new { item.Id, item.SymbolInfoId })
-                .ToArrayAsync(ct);
-
-            // 轉換為只包含必要欄位的 entity
-            FuturesCoinBinanceKline[] klines = [.. klineMinimalData.Select(x => new FuturesCoinBinanceKline
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinBinancePremiumIndexKline[] premiumIndexKlines = [.. premiumIndexMinimalData.Select(x => new FuturesCoinBinancePremiumIndexKline
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinBinanceIndexPriceKline[] indexPriceKlines = [.. indexPriceMinimalData.Select(x => new FuturesCoinBinanceIndexPriceKline
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinBinanceMarkPriceKline[] markPriceKlines = [.. markPriceMinimalData.Select(x => new FuturesCoinBinanceMarkPriceKline
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinFundingRate[] fundingRates = [.. fundingRateMinimalData.Select(x => new FuturesCoinFundingRate
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinOpenInterestHistory[] openInterestHistories = [.. openInterestMinimalData.Select(x => new FuturesCoinOpenInterestHistory
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinBasis[] basisHistories = [.. basisMinimalData.Select(x => new FuturesCoinBasis
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinTopLongShortPositionRatio[] topLongShortPositionRatios = [.. topLongShortPositionRatioMinimalData.Select(x => new FuturesCoinTopLongShortPositionRatio
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinTopLongShortAccountRatio[] topLongShortAccountRatios = [.. topLongShortAccountRatioMinimalData.Select(x => new FuturesCoinTopLongShortAccountRatio
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinGlobalLongShortAccountRatio[] globalLongShortAccountRatios = [.. globalLongShortAccountRatioMinimalData.Select(x => new FuturesCoinGlobalLongShortAccountRatio
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            FuturesCoinTakerLongShortRatio[] takerLongShortRatios = [.. takerLongShortRatioMinimalData.Select(x => new FuturesCoinTakerLongShortRatio
-            {
-                Id = x.Id,
-                SymbolInfoId = x.SymbolInfoId
-            })];
-
-            using IDbContextTransaction transaction = db.Database.BeginTransaction();
-            Dictionary<DbContext, IEnumerable<FuturesCoinBinanceKline>> bulkShardingEnumerable = db.BulkShardingTableEnumerable(klines);
-            Dictionary<DbContext, IEnumerable<FuturesCoinBinancePremiumIndexKline>> bulkShardingEnumerablePremiumIndex = db.BulkShardingTableEnumerable(premiumIndexKlines);
-            Dictionary<DbContext, IEnumerable<FuturesCoinBinanceIndexPriceKline>> bulkShardingEnumerableIndexPrice = db.BulkShardingTableEnumerable(indexPriceKlines);
-            Dictionary<DbContext, IEnumerable<FuturesCoinBinanceMarkPriceKline>> bulkShardingEnumerableMarkPrice = db.BulkShardingTableEnumerable(markPriceKlines);
-            Dictionary<DbContext, IEnumerable<FuturesCoinFundingRate>> bulkShardingEnumerableFundingRates = db.BulkShardingTableEnumerable(fundingRates);
-            Dictionary<DbContext, IEnumerable<FuturesCoinOpenInterestHistory>> bulkShardingEnumerableOpenInterest = db.BulkShardingTableEnumerable(openInterestHistories);
-            Dictionary<DbContext, IEnumerable<FuturesCoinBasis>> bulkShardingEnumerableBasis = db.BulkShardingTableEnumerable(basisHistories);
-            Dictionary<DbContext, IEnumerable<FuturesCoinTopLongShortPositionRatio>> bulkShardingEnumerableTopLongShortPositionRatios = db.BulkShardingTableEnumerable(topLongShortPositionRatios);
-            Dictionary<DbContext, IEnumerable<FuturesCoinTopLongShortAccountRatio>> bulkShardingEnumerableTopLongShortAccountRatios = db.BulkShardingTableEnumerable(topLongShortAccountRatios);
-            Dictionary<DbContext, IEnumerable<FuturesCoinGlobalLongShortAccountRatio>> bulkShardingEnumerableGlobalLongShortAccountRatios = db.BulkShardingTableEnumerable(globalLongShortAccountRatios);
-            Dictionary<DbContext, IEnumerable<FuturesCoinTakerLongShortRatio>> bulkShardingEnumerableTakerLongShortRatios = db.BulkShardingTableEnumerable(takerLongShortRatios);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinanceKline>> item in bulkShardingEnumerable)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinancePremiumIndexKline>> item in bulkShardingEnumerablePremiumIndex)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinanceIndexPriceKline>> item in bulkShardingEnumerableIndexPrice)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBinanceMarkPriceKline>> item in bulkShardingEnumerableMarkPrice)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinFundingRate>> item in bulkShardingEnumerableFundingRates)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinOpenInterestHistory>> item in bulkShardingEnumerableOpenInterest)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinBasis>> item in bulkShardingEnumerableBasis)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinTopLongShortPositionRatio>> item in bulkShardingEnumerableTopLongShortPositionRatios)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinTopLongShortAccountRatio>> item in bulkShardingEnumerableTopLongShortAccountRatios)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinGlobalLongShortAccountRatio>> item in bulkShardingEnumerableGlobalLongShortAccountRatios)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            foreach (KeyValuePair<DbContext, IEnumerable<FuturesCoinTakerLongShortRatio>> item in bulkShardingEnumerableTakerLongShortRatios)
-                await item.Key.BulkDeleteAsync(item.Value.ToArray(), bulkConfig, cancellationToken: ct);
-            await transaction.CommitAsync(ct);
+            await db.FuturesCoinBinanceKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinBinancePremiumIndexKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinBinanceIndexPriceKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinBinanceMarkPriceKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinFundingRates.Where(item => item.FundingTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinOpenInterestHistories.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinBasisHistories.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinTopLongShortPositionRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinTopLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinGlobalLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await db.FuturesCoinTakerLongShortRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
         }
     }
 
