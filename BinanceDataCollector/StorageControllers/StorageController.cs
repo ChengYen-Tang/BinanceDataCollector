@@ -41,6 +41,8 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     protected static string RootGlobalLongShortAccountRatioPath = Path.Combine(DataPath, "GlobalLongShortAccountRatio");
     protected static string RootTakerLongShortRatioPath = Path.Combine(DataPath, "TakerLongShortRatio");
     protected static string RootBasisPath = Path.Combine(DataPath, "Basis");
+    protected static string RootSymbolInfoPath = Path.Combine(DataPath, "SymbolInfo");
+    protected abstract string SymbolInfoPath { get; }
     protected abstract string KlinePath { get; }
     protected abstract string PremiumIndexKlinePath { get; }
     protected abstract string IndexPriceKlinePath { get; }
@@ -310,6 +312,23 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         }
 
         logger.LogInformation("Csv export symbols loaded. StorageController: {StorageController}, SymbolCount: {SymbolCount}", GetType().Name, symbolNamesResult.Value.Length);
+
+        if (Directory.Exists(SymbolInfoPath))
+            Directory.Delete(SymbolInfoPath, true);
+        Directory.CreateDirectory(SymbolInfoPath);
+        logger.LogInformation("Start csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, "SymbolInfo");
+
+        Result<SymbolInfoCsv[]> symbolInfosResult = await GetCsvSymbolInfosAsync(ct);
+        if (symbolInfosResult.IsFailed)
+            logger.LogError(symbolInfosResult.Errors[0].Message);
+        else
+        {
+            string symbolInfoPath = Path.Combine(SymbolInfoPath, "symbols.csv");
+            CsvExporter exporter = new();
+            await exporter.Export(symbolInfoPath, symbolInfosResult.Value);
+        }
+
+        logger.LogInformation("Finish csv export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, "SymbolInfo");
 
         if (Directory.Exists(KlinePath))
             Directory.Delete(KlinePath, true);
@@ -719,6 +738,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     protected abstract Task<Result<List<T11>>> GetBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected abstract Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default);
+    protected abstract Task<Result<SymbolInfoCsv[]>> GetCsvSymbolInfosAsync(CancellationToken ct = default);
 
     protected abstract Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default);
 

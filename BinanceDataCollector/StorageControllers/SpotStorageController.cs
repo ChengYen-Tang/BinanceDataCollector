@@ -20,6 +20,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     public SpotStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<SpotStorageController> logger, IBinanceRestClient client)
         : base(serviceProvider, logger) => (spot) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? []));
 
+    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "Spot"); } }
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "Spot"); } }
     protected override string PremiumIndexKlinePath => throw new NotImplementedException();
     protected override string IndexPriceKlinePath => throw new NotSupportedException("Spot market does not support index price klines.");
@@ -110,6 +111,39 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         string[] symbols = await db.BinanceSymbolInfos.AsNoTracking().Select(item => item.Name).ToArrayAsync(ct);
         if (symbols.Length == 0)
             return Result.Fail("No symbols found.");
+        return Result.Ok(symbols);
+    }
+
+    protected override async Task<Result<SymbolInfoCsv[]>> GetCsvSymbolInfosAsync(CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        SymbolInfoCsv[] symbols = await db.BinanceSymbolInfos.AsNoTracking()
+            .OrderBy(item => item.Name)
+            .Select(item => new SymbolInfoCsv
+            {
+                Name = item.Name,
+                Status = item.Status.ToString(),
+                BaseAsset = item.BaseAsset,
+                QuoteAsset = item.QuoteAsset,
+                BaseAssetPrecision = item.BaseAssetPrecision,
+                QuoteAssetPrecision = item.QuoteAssetPrecision,
+                BaseFeePrecision = item.BaseFeePrecision,
+                QuoteFeePrecision = item.QuoteFeePrecision,
+                OrderTypes = string.Join('|', item.OrderTypes),
+                Permissions = string.Join('|', item.Permissions),
+                IcebergAllowed = item.IcebergAllowed,
+                CancelReplaceAllowed = item.CancelReplaceAllowed,
+                IsSpotTradingAllowed = item.IsSpotTradingAllowed,
+                AllowTrailingStop = item.AllowTrailingStop,
+                IsMarginTradingAllowed = item.IsMarginTradingAllowed,
+                OCOAllowed = item.OCOAllowed,
+                QuoteOrderQuantityMarketAllowed = item.QuoteOrderQuantityMarketAllowed
+            })
+            .ToArrayAsync(ct);
+        if (symbols.Length == 0)
+            return Result.Fail("No symbol infos found.");
         return Result.Ok(symbols);
     }
 

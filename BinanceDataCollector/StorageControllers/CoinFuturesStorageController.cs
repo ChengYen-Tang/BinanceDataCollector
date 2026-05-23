@@ -20,6 +20,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
     public CoinFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, IBinanceRestClient client)
         : base(serviceProvider, logger) => (coinFutures) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? []));
 
+    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "CoinFutures"); } }
     protected override string KlinePath { get { return Path.Combine(RootKlinePath, "CoinFutures"); } }
     protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, "CoinFutures"); } }
     protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, "CoinFutures"); } }
@@ -133,6 +134,44 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         string[] symbols = await db.BinanceFuturesCoinSymbolInfos.AsNoTracking().Select(item => item.Name).ToArrayAsync(ct);
         if (symbols.Length == 0)
             return Result.Fail("No symbols found.");
+        return Result.Ok(symbols);
+    }
+
+    protected override async Task<Result<SymbolInfoCsv[]>> GetCsvSymbolInfosAsync(CancellationToken ct = default)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IServiceProvider service = scope.ServiceProvider;
+        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
+        SymbolInfoCsv[] symbols = await db.BinanceFuturesCoinSymbolInfos.AsNoTracking()
+            .OrderBy(item => item.Name)
+            .Select(item => new SymbolInfoCsv
+            {
+                Name = item.Name,
+                Status = item.Status.ToString(),
+                BaseAsset = item.BaseAsset,
+                QuoteAsset = item.QuoteAsset,
+                MarginAsset = item.MarginAsset,
+                Pair = item.Pair,
+                BaseAssetPrecision = item.BaseAssetPrecision,
+                QuoteAssetPrecision = item.QuoteAssetPrecision,
+                PricePrecision = item.PricePrecision,
+                QuantityPrecision = item.QuantityPrecision,
+                ContractType = item.ContractType.ToString(),
+                UnderlyingType = item.UnderlyingType.ToString(),
+                UnderlyingSubType = string.Join('|', item.UnderlyingSubType),
+                OrderTypes = string.Join('|', item.OrderTypes),
+                TimeInForce = string.Join('|', item.TimeInForce),
+                MaintMarginPercent = item.MaintMarginPercent,
+                RequiredMarginPercent = item.RequiredMarginPercent,
+                TriggerProtect = item.TriggerProtect,
+                LiquidationFee = item.LiquidationFee,
+                MarketTakeBound = item.MarketTakeBound,
+                ListingDate = DateTimeConverter.ConvertToMilliseconds(item.ListingDate).Value,
+                DeliveryDate = DateTimeConverter.ConvertToMilliseconds(item.DeliveryDate).Value
+            })
+            .ToArrayAsync(ct);
+        if (symbols.Length == 0)
+            return Result.Fail("No symbol infos found.");
         return Result.Ok(symbols);
     }
 
