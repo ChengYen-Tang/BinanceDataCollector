@@ -74,23 +74,41 @@ public class HangfireJob
             return;
         logger.LogInformation("HangfireJob running at: {time}", DateTimeOffset.Now);
         isRunning = true;
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider scopeServiceProvider = scope.ServiceProvider;
-        ICollectorController[] controllers = scopeServiceProvider.GetServices<ICollectorController>().ToArray();
-        foreach (ICollectorController controller in controllers)
-            await controller.GatherAsync(ct);
-        ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
-        logger.LogInformation("Waiting for production line to finish at: {time}", DateTimeOffset.Now);
-        productionLine.Wait();
-        logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
-        productionLine.ResetEvent();
-        foreach (ICollectorController controller in controllers)
+        try
         {
-            logger.LogInformation("Start exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
-            await controller.ExportToCsvAsync(ct);
-            logger.LogInformation("Finish exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+            using IServiceScope scope = serviceProvider.CreateScope();
+            IServiceProvider scopeServiceProvider = scope.ServiceProvider;
+            ICollectorController[] controllers = scopeServiceProvider.GetServices<ICollectorController>().ToArray();
+            foreach (ICollectorController controller in controllers)
+                await controller.GatherAsync(ct);
+            ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
+            logger.LogInformation("Waiting for production line to finish at: {time}", DateTimeOffset.Now);
+            productionLine.Wait();
+            logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
+            productionLine.ResetEvent();
+
+            CsvExportArchiveHelper.PrepareWorkRoot();
+            try
+            {
+                foreach (ICollectorController controller in controllers)
+                {
+                    logger.LogInformation("Start exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+                    await controller.ExportToCsvAsync(ct);
+                    logger.LogInformation("Finish exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+                }
+
+                await CsvExportArchiveHelper.FinalizeArchiveAsync(ct);
+                logger.LogInformation("Finish packaging csv archive at: {time}", DateTimeOffset.Now);
+            }
+            finally
+            {
+                CsvExportArchiveHelper.CleanupWorkRoot();
+            }
         }
-        isRunning = false;
-        logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
+        finally
+        {
+            isRunning = false;
+            logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
+        }
     }
 }

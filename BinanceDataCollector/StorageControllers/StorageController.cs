@@ -29,7 +29,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
     protected readonly static BulkConfig bulkConfig = new() { UseTempDB = true, BatchSize = 14400 };
-    protected static string DataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
+    protected static string DataPath = CsvExportArchiveHelper.WorkRootPath;
     protected static string RootKlinePath = Path.Combine(DataPath, "Kline");
     protected static string RootPremiumIndexKlinePath = Path.Combine(DataPath, "PremiumIndexKline");
     protected static string RootIndexPriceKlinePath = Path.Combine(DataPath, "IndexPriceKline");
