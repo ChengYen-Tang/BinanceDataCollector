@@ -30,6 +30,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     protected readonly DateTime yearsReserved;
     protected readonly static BulkConfig bulkConfig = new() { UseTempDB = true, BatchSize = 14400 };
     protected static string DataPath = CsvExportArchiveHelper.WorkRootPath;
+    protected static string MarketDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "BinanceMarketData");
     protected static string RootKlinePath = Path.Combine(DataPath, "Kline");
     protected static string RootPremiumIndexKlinePath = Path.Combine(DataPath, "PremiumIndexKline");
     protected static string RootIndexPriceKlinePath = Path.Combine(DataPath, "IndexPriceKline");
@@ -42,6 +43,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     protected static string RootTakerLongShortRatioPath = Path.Combine(DataPath, "TakerLongShortRatio");
     protected static string RootBasisPath = Path.Combine(DataPath, "Basis");
     protected static string RootSymbolInfoPath = Path.Combine(DataPath, "SymbolInfo");
+    protected abstract string MarketPathSegment { get; }
     protected abstract string SymbolInfoPath { get; }
     protected abstract string KlinePath { get; }
     protected abstract string PremiumIndexKlinePath { get; }
@@ -762,6 +764,33 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         else
             logger.LogInformation("Table cleanup status. Table: {Table}, Missing: 1, Dropped: 0, Failed: 0", result.EscapedTableName);
     }
+
+    protected Task DeleteMarketDataSymbolDirectoriesAsync(IReadOnlyCollection<string> delistedSymbols, IReadOnlyCollection<string> marketDataTypes, CancellationToken ct = default)
+    {
+        if (delistedSymbols.Count == 0 || marketDataTypes.Count == 0)
+            return Task.CompletedTask;
+
+        foreach (string dataType in marketDataTypes)
+        {
+            string marketPath = GetMarketDataMarketPath(dataType);
+            if (!Directory.Exists(marketPath))
+                continue;
+
+            foreach (string symbol in delistedSymbols)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                string symbolPath = Path.Combine(marketPath, symbol);
+                if (Directory.Exists(symbolPath))
+                    Directory.Delete(symbolPath, true);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private string GetMarketDataMarketPath(string dataType)
+        => Path.Combine(MarketDataPath, dataType, MarketPathSegment);
 
     protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
         => $"{symbol}-{interval}-{closeTime:s}";

@@ -14,24 +14,27 @@ namespace BinanceDataCollector.StorageControllers;
 
 internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate, FuturesUsdtOpenInterestHistory, FuturesUsdtTopLongShortPositionRatio, FuturesUsdtTopLongShortAccountRatio, FuturesUsdtGlobalLongShortAccountRatio, FuturesUsdtTakerLongShortRatio, FuturesUsdtBasis>
 {
+    private const string Market = "UsdFutures";
     private readonly UsdFutures usdFutures;
 
     public UsdFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<UsdFuturesStorageController> logger, IBinanceRestClient client)
         : base(serviceProvider, logger) => (usdFutures) = (new(client, configuration.GetSection("IgnoneCoins:UsdFutures").Get<string[]>() ?? []));
 
-    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "UsdFutures"); } }
-    protected override string KlinePath { get { return Path.Combine(RootKlinePath, "UsdFutures"); } }
-    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, "UsdFutures"); } }
-    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, "UsdFutures"); } }
-    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, "UsdFutures"); } }
-    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, "UsdFutures"); } }
-    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, "UsdFutures"); } }
-    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, "UsdFutures"); } }
-    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, "UsdFutures"); } }
-    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, "UsdFutures"); } }
-    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, "UsdFutures"); } }
-    protected override string BasisPath { get { return Path.Combine(RootBasisPath, "UsdFutures"); } }
+    protected override string MarketPathSegment => Market;
+    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, Market); } }
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market); } }
+    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, Market); } }
+    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, Market); } }
+    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, Market); } }
+    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, Market); } }
+    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, Market); } }
+    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, Market); } }
+    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, Market); } }
+    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, Market); } }
+    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market); } }
+    protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market); } }
     protected override bool IsFutures => true;
+    private IReadOnlyCollection<string> marketDataTypes => ["AggTrades"];
 
     protected override string GetSymbolName(BinanceFuturesUsdtSymbolInfo symbol)
         => symbol.Name;
@@ -57,6 +60,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         ], LogDropStatus, ct);
         
         await db.BinanceFuturesUsdtSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
+        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, marketDataTypes, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)

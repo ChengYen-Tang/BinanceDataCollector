@@ -15,24 +15,27 @@ namespace BinanceDataCollector.StorageControllers;
 
 internal class CoinFuturesStorageController : StorageController<BinanceFuturesCoinSymbolInfo, FuturesCoinBinanceKline, FuturesCoinBinancePremiumIndexKline, FuturesCoinBinanceIndexPriceKline, FuturesCoinBinanceMarkPriceKline, FuturesCoinFundingRate, FuturesCoinOpenInterestHistory, FuturesCoinTopLongShortPositionRatio, FuturesCoinTopLongShortAccountRatio, FuturesCoinGlobalLongShortAccountRatio, FuturesCoinTakerLongShortRatio, FuturesCoinBasis>
 {
+    private const string Market = "CoinFutures";
     private readonly CoinFutures coinFutures;
 
     public CoinFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, IBinanceRestClient client)
         : base(serviceProvider, logger) => (coinFutures) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? []));
 
-    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "CoinFutures"); } }
-    protected override string KlinePath { get { return Path.Combine(RootKlinePath, "CoinFutures"); } }
-    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, "CoinFutures"); } }
-    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, "CoinFutures"); } }
-    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, "CoinFutures"); } }
-    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, "CoinFutures"); } }
-    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, "CoinFutures"); } }
-    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, "CoinFutures"); } }
-    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, "CoinFutures"); } }
-    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, "CoinFutures"); } }
-    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, "CoinFutures"); } }
-    protected override string BasisPath { get { return Path.Combine(RootBasisPath, "CoinFutures"); } }
+    protected override string MarketPathSegment => Market;
+    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, Market); } }
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market); } }
+    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, Market); } }
+    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, Market); } }
+    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, Market); } }
+    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, Market); } }
+    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, Market); } }
+    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, Market); } }
+    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, Market); } }
+    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, Market); } }
+    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market); } }
+    protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market); } }
     protected override bool IsFutures => true;
+    private static IReadOnlyCollection<string> MarketDataTypes => ["AggTrades"];
 
     protected override string GetSymbolName(BinanceFuturesCoinSymbolInfo symbol)
         => symbol.Name;
@@ -58,6 +61,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         ], LogDropStatus, ct);
 
         await db.BinanceFuturesCoinSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
+        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, MarketDataTypes, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
