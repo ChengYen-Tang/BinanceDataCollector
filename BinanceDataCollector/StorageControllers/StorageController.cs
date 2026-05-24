@@ -1,4 +1,5 @@
-﻿using BinanceDataCollector.WorkItems;
+﻿using BinanceDataCollector.Collectors.BinanceMarketData;
+using BinanceDataCollector.WorkItems;
 using CollectorModels;
 using CollectorModels.Models;
 using CollectorModels.Models.Csv;
@@ -31,6 +32,7 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     protected readonly static BulkConfig bulkConfig = new() { UseTempDB = true, BatchSize = 14400 };
     protected static string DataPath = CsvExportArchiveHelper.WorkRootPath;
     protected static string MarketDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "BinanceMarketData");
+    protected static string MarketDataTempPath = Path.Combine(CsvExportArchiveHelper.TmpPath, "BinanceMarketData");
     protected static string RootKlinePath = Path.Combine(DataPath, "Kline");
     protected static string RootPremiumIndexKlinePath = Path.Combine(DataPath, "PremiumIndexKline");
     protected static string RootIndexPriceKlinePath = Path.Combine(DataPath, "IndexPriceKline");
@@ -720,13 +722,16 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     public abstract Task<DateTime> GetLastBasisTimeAsync(T symbol, CancellationToken ct = default);
 
     public abstract Task DeleteOldData(CancellationToken ct = default);
+    public abstract Task<AsyncWorkItem<MarketDataDownloadBatch>> UpdateAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected abstract string GetSymbolName(T symbol);
     protected abstract Task<List<string>> GetExistingSymbolNamesAsync(BinanceDbContext db, CancellationToken ct = default);
     protected abstract Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default);
 
+    protected abstract Task InsertAggTradesAsync(MarketDataDownloadBatch batch, CancellationToken ct = default);
     protected abstract Task<Result<List<T>>> GetMarketAsync(CancellationToken ct = default);
 
+    protected abstract Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T1>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T2>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T3>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
@@ -791,6 +796,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
 
     private string GetMarketDataMarketPath(string dataType)
         => Path.Combine(MarketDataPath, dataType, MarketPathSegment);
+
+    protected string GetMarketDataSymbolPath(string dataType, string symbol)
+        => Path.Combine(GetMarketDataMarketPath(dataType), symbol);
+
+    protected string GetMarketDataTempSymbolPath(string dataType, string symbol)
+        => Path.Combine(MarketDataTempPath, dataType, MarketPathSegment, symbol);
 
     protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
         => $"{symbol}-{interval}-{closeTime:s}";
