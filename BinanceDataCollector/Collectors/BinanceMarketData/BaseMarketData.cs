@@ -33,6 +33,7 @@ internal abstract class BaseMarketData
             DateTime lastCompletedMonth = currentMonthStart.AddMonths(-1);
 
             List<MarketDataDownloadFile> files = [];
+            HashSet<DateTime> monthlyCoveredMonths = [];
             if (startMonth <= lastCompletedMonth)
             {
                 IReadOnlyList<string> monthlyFileNames = await GetAvailableMonthlyFileNamesAsync(dataType, symbol, startMonth, lastCompletedMonth, ct);
@@ -45,14 +46,17 @@ internal abstract class BaseMarketData
                         fileName,
                         Path.Combine(tempSymbolPath, "Monthly"));
                     if (await EnsureDownloadFileAsync(file, ct))
+                    {
                         files.Add(file);
+                        monthlyCoveredMonths.Add(new DateTime(ExtractMonth(fileName, symbol, dataType).Year, ExtractMonth(fileName, symbol, dataType).Month, 1));
+                    }
                 }
             }
 
-            DateTime dailyStartDate = startTime.Date > currentMonthStart ? startTime.Date : currentMonthStart;
+            DateTime dailyStartDate = startTime.Date;
             if (dailyStartDate <= lastDailyDate)
             {
-                IReadOnlyList<string> dailyFileNames = await GetAvailableDailyFileNamesAsync(dataType, symbol, dailyStartDate, lastDailyDate, ct);
+                IReadOnlyList<string> dailyFileNames = await GetAvailableDailyFileNamesAsync(dataType, symbol, dailyStartDate, lastDailyDate, monthlyCoveredMonths, ct);
                 foreach (string fileName in dailyFileNames)
                 {
                     MarketDataDownloadFile file = CreateDownloadFile(
@@ -186,7 +190,7 @@ internal abstract class BaseMarketData
             .ToArray();
     }
 
-    private async Task<IReadOnlyList<string>> GetAvailableDailyFileNamesAsync(string dataType, string symbol, DateTime startDate, DateTime lastDailyDate, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> GetAvailableDailyFileNamesAsync(string dataType, string symbol, DateTime startDate, DateTime lastDailyDate, IReadOnlySet<DateTime> monthlyCoveredMonths, CancellationToken ct)
     {
         string prefix = BuildPrefix(dataType, symbol, "daily");
         string marker = prefix;
@@ -198,9 +202,16 @@ internal abstract class BaseMarketData
             .Where(fileName => TryParsePeriod(fileName, symbol, dataType, "yyyy-MM-dd", out DateTime fileDate)
                 && fileDate >= startDate
                 && fileDate <= lastDailyDate)
+            .Where(fileName => TryParsePeriod(fileName, symbol, dataType, "yyyy-MM-dd", out DateTime fileDate)
+                && !monthlyCoveredMonths.Contains(new DateTime(fileDate.Year, fileDate.Month, 1)))
             .OrderBy(fileName => fileName, StringComparer.Ordinal)
             .ToArray();
     }
+
+    private static DateTime ExtractMonth(string fileName, string symbol, string dataType)
+        => TryParsePeriod(fileName, symbol, dataType, "yyyy-MM", out DateTime fileMonth)
+            ? fileMonth
+            : throw new InvalidDataException($"Invalid monthly file name: {fileName}");
 
     private static async Task<bool> DownloadFileAsync(string relativePath, string destinationPath, CancellationToken ct)
     {
