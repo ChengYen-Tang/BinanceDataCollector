@@ -29,7 +29,7 @@ internal static class CsvExportArchiveHelper
         if (Directory.Exists(WorkRootPath))
             Directory.Delete(WorkRootPath, true);
 
-        if (Directory.Exists(TmpPath) && !Directory.EnumerateFileSystemEntries(TmpPath).Any())
+        if (Directory.Exists(TmpPath))
             Directory.Delete(TmpPath, true);
     }
 

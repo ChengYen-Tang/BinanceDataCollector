@@ -87,28 +87,42 @@ public class HangfireJob
             logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
             productionLine.ResetEvent();
 
-            CsvExportArchiveHelper.PrepareWorkRoot();
-            try
-            {
-                foreach (ICollectorController controller in controllers)
-                {
-                    logger.LogInformation("Start exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
-                    await controller.ExportToCsvAsync(ct);
-                    logger.LogInformation("Finish exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
-                }
-
-                await CsvExportArchiveHelper.FinalizeArchiveAsync(ct);
-                logger.LogInformation("Finish packaging csv archive at: {time}", DateTimeOffset.Now);
-            }
-            finally
-            {
-                CsvExportArchiveHelper.CleanupWorkRoot();
-            }
+            Task csvArchiveTask = ExportCsvArchiveAsync(controllers, ct);
+            Task marketDataArchiveTask = PackageMarketDataArchiveAsync(ct);
+            await Task.WhenAll(csvArchiveTask, marketDataArchiveTask);
         }
         finally
         {
             isRunning = false;
             logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
         }
+    }
+
+    private async Task ExportCsvArchiveAsync(ICollectorController[] controllers, CancellationToken ct)
+    {
+        CsvExportArchiveHelper.PrepareWorkRoot();
+        try
+        {
+            foreach (ICollectorController controller in controllers)
+            {
+                logger.LogInformation("Start exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+                await controller.ExportToCsvAsync(ct);
+                logger.LogInformation("Finish exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+            }
+
+            await CsvExportArchiveHelper.FinalizeArchiveAsync(ct);
+            logger.LogInformation("Finish packaging csv archive at: {time}", DateTimeOffset.Now);
+        }
+        finally
+        {
+            CsvExportArchiveHelper.CleanupWorkRoot();
+        }
+    }
+
+    private async Task PackageMarketDataArchiveAsync(CancellationToken ct)
+    {
+        logger.LogInformation("Start packaging market data archive at: {time}", DateTimeOffset.Now);
+        await MarketDataArchiveHelper.FinalizeArchiveAsync(ct);
+        logger.LogInformation("Finish packaging market data archive at: {time}", DateTimeOffset.Now);
     }
 }
