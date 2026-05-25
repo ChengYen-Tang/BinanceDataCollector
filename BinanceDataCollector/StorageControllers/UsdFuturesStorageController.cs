@@ -90,6 +90,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
             await db.FuturesUsdtTopLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
             await db.FuturesUsdtGlobalLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
             await db.FuturesUsdtTakerLongShortRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await DeleteOldAggTradesDataAsync(symbolName, ct);
         }
     }
 

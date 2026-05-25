@@ -65,9 +65,12 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
             .ToListAsync(ct);
 
         foreach (string symbolName in symbolNames)
+        {
             await db.SpotBinanceKlines
                 .Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName)
                 .ExecuteDeleteAsync(ct);
+            await DeleteOldAggTradesDataAsync(symbolName, ct);
+        }
     }
 
     public override async Task<DateTime> GetLastTimeAsync(BinanceSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)

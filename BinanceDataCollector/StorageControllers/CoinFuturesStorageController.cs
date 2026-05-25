@@ -91,6 +91,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
             await db.FuturesCoinTopLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
             await db.FuturesCoinGlobalLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
             await db.FuturesCoinTakerLongShortRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await DeleteOldAggTradesDataAsync(symbolName, ct);
         }
     }
 

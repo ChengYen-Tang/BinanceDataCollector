@@ -882,6 +882,84 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         return Task.CompletedTask;
     }
 
+    protected Task DeleteOldAggTradesDataAsync(string symbolName, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        string symbolPath = GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbolName);
+        string monthlyRootPath = Path.Combine(symbolPath, "Monthly");
+        string dailyRootPath = Path.Combine(symbolPath, "Daily");
+
+        DeleteOverlappedAggTradesDailyDirectories(monthlyRootPath, dailyRootPath, ct);
+        DeleteExpiredAggTradesDirectories(monthlyRootPath, dailyRootPath, ct);
+
+        DeleteDirectoryIfEmpty(monthlyRootPath);
+        DeleteDirectoryIfEmpty(dailyRootPath);
+        DeleteDirectoryIfEmpty(symbolPath);
+
+        return Task.CompletedTask;
+    }
+
+    private void DeleteOverlappedAggTradesDailyDirectories(string monthlyRootPath, string dailyRootPath, CancellationToken ct)
+    {
+        if (!Directory.Exists(monthlyRootPath) || !Directory.Exists(dailyRootPath))
+            return;
+
+        foreach (string monthlyDirectory in Directory.EnumerateDirectories(monthlyRootPath))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string monthName = Path.GetFileName(monthlyDirectory);
+            if (!File.Exists(Path.Combine(monthlyDirectory, "_SUCCESS")))
+                continue;
+
+            if (!DateTime.TryParseExact(monthName, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
+                continue;
+
+            foreach (string dailyDirectory in Directory.EnumerateDirectories(dailyRootPath, $"{month:yyyy-MM}-*"))
+            {
+                ct.ThrowIfCancellationRequested();
+                Directory.Delete(dailyDirectory, true);
+            }
+        }
+    }
+
+    private void DeleteExpiredAggTradesDirectories(string monthlyRootPath, string dailyRootPath, CancellationToken ct)
+    {
+        DateTime reservedDate = yearsReserved.Date;
+
+        if (Directory.Exists(monthlyRootPath))
+        {
+            foreach (string monthlyDirectory in Directory.EnumerateDirectories(monthlyRootPath))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                string monthName = Path.GetFileName(monthlyDirectory);
+                if (!DateTime.TryParseExact(monthName, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
+                    continue;
+
+                DateTime monthEnd = new DateTime(month.Year, month.Month, DateTime.DaysInMonth(month.Year, month.Month));
+                if (monthEnd < reservedDate)
+                    Directory.Delete(monthlyDirectory, true);
+            }
+        }
+
+        if (!Directory.Exists(dailyRootPath))
+            return;
+
+        foreach (string dailyDirectory in Directory.EnumerateDirectories(dailyRootPath))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string dayName = Path.GetFileName(dailyDirectory);
+            if (!DateTime.TryParseExact(dayName, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out DateTime day))
+                continue;
+
+            if (day < reservedDate)
+                Directory.Delete(dailyDirectory, true);
+        }
+    }
+
     private string GetMarketDataMarketPath(string dataType)
         => Path.Combine(MarketDataPath, dataType, MarketPathSegment);
 
