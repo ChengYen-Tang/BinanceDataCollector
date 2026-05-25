@@ -14,10 +14,15 @@ internal static class MarketDataArchiveHelper
     private static readonly string ArchivePath = Path.Combine(DataPath, ArchiveFileName);
     private static readonly string HashPath = Path.Combine(DataPath, HashFileName);
 
-    public static async Task FinalizeArchiveAsync(CancellationToken ct = default)
+    public static async Task<bool> FinalizeArchiveAsync(ILogger logger, CancellationToken ct = default)
     {
         Directory.CreateDirectory(DataPath);
-        Directory.CreateDirectory(MarketDataPath);
+        if (!Directory.Exists(MarketDataPath))
+        {
+            logger.LogWarning("Skip packaging market data archive because source path does not exist. Path: {Path}", MarketDataPath);
+            return false;
+        }
+
         DeleteFileIfExists(ArchivePath);
         DeleteFileIfExists(HashPath);
 
@@ -25,6 +30,7 @@ internal static class MarketDataArchiveHelper
 
         string hashText = await ComputeSha256Async(ArchivePath, ct);
         await File.WriteAllTextAsync(HashPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);
+        return true;
     }
 
     private static void DeleteFileIfExists(string path)

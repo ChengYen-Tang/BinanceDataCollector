@@ -122,7 +122,8 @@ public class HangfireJob
     private async Task PackageMarketDataArchiveAsync(CancellationToken ct)
     {
         logger.LogInformation("Start packaging market data archive at: {time}", DateTimeOffset.Now);
-        await MarketDataArchiveHelper.FinalizeArchiveAsync(ct);
-        logger.LogInformation("Finish packaging market data archive at: {time}", DateTimeOffset.Now);
+        bool packaged = await MarketDataArchiveHelper.FinalizeArchiveAsync(logger, ct);
+        if (packaged)
+            logger.LogInformation("Finish packaging market data archive at: {time}", DateTimeOffset.Now);
     }
 }
