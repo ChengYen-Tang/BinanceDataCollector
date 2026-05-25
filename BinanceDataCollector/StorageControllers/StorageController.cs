@@ -281,6 +281,22 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         return new AsyncWorkItem<IList<T11>>(InsertBasisAsync, result.Value, ct);
     }
 
+    public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", "AggTrades", symbol, startTime);
+        Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, startTime, ct);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", "AggTrades", symbol, startTime);
+        if (result.IsFailed)
+        {
+            LogSyncFailure("AggTrades", symbol, result.Errors[0].Message, startTime: startTime);
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertAggTradesAsync, null, ct);
+        }
+
+        return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertAggTradesAsync, result.Value, ct);
+    }
+
     protected void LogSyncFailure(string dataType, T symbol, string message, KlineInterval? interval = null, DateTime? startTime = null)
         => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
             dataType, symbol, interval, startTime, message);
@@ -709,6 +725,15 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         }
     }
 
+    protected virtual Task InsertAggTradesAsync(MarketDataDownloadBatch? batch, CancellationToken ct = default)
+    {
+        if (batch is null || batch.Files.Count == 0)
+            return Task.CompletedTask;
+
+        logger.LogDebug("AggTrades temp batch ready. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
+        return Task.CompletedTask;
+    }
+
     public abstract Task<DateTime> GetLastTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastPremiumIndexTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastIndexPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
@@ -722,13 +747,11 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
     public abstract Task<DateTime> GetLastBasisTimeAsync(T symbol, CancellationToken ct = default);
 
     public abstract Task DeleteOldData(CancellationToken ct = default);
-    public abstract Task<AsyncWorkItem<MarketDataDownloadBatch>> UpdateAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected abstract string GetSymbolName(T symbol);
     protected abstract Task<List<string>> GetExistingSymbolNamesAsync(BinanceDbContext db, CancellationToken ct = default);
     protected abstract Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default);
 
-    protected abstract Task InsertAggTradesAsync(MarketDataDownloadBatch batch, CancellationToken ct = default);
     protected abstract Task<Result<List<T>>> GetMarketAsync(CancellationToken ct = default);
 
     protected abstract Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default);

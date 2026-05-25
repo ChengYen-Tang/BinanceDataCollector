@@ -3,7 +3,6 @@ using Binance.Net.Objects.Models.Futures;
 using BinanceDataCollector.Collectors.BinanceApi;
 using MarketDataDownloadBatch = BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch;
 using MarketDataUsdFutures = BinanceDataCollector.Collectors.BinanceMarketData.UsdFutures;
-using BinanceDataCollector.WorkItems;
 using CollectorModels;
 using CollectorModels.Models;
 using CollectorModels.Models.Csv;
@@ -271,40 +270,6 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
         => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath("AggTrades", symbol.Name), ct);
-
-    public override async Task<AsyncWorkItem<MarketDataDownloadBatch>> UpdateAggTradesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-    {
-        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", "AggTrades", symbol, startTime);
-        Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", "AggTrades", symbol, startTime);
-        if (result.IsFailed)
-        {
-            LogSyncFailure("AggTrades", symbol, result.Errors[0].Message, startTime: startTime);
-            if (result.Errors[0].Message != "Invalid symbol.")
-                await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<MarketDataDownloadBatch>(InsertAggTradesAsync, CreateEmptyMarketDataDownloadBatch(symbol.Name), ct);
-        }
-
-        return new AsyncWorkItem<MarketDataDownloadBatch>(InsertAggTradesAsync, result.Value, ct);
-    }
-
-    protected override Task InsertAggTradesAsync(MarketDataDownloadBatch batch, CancellationToken ct = default)
-    {
-        if (batch.Files.Count == 0)
-            return Task.CompletedTask;
-
-        logger.LogDebug("AggTrades temp batch ready. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
-        return Task.CompletedTask;
-    }
-
-    private static MarketDataDownloadBatch CreateEmptyMarketDataDownloadBatch(string symbol)
-        => new()
-        {
-            MarketPathSegment = Market,
-            DataType = "aggTrades",
-            Symbol = symbol,
-            Files = [],
-        };
 
     protected override async Task<Result<List<FuturesUsdtBinancePremiumIndexKline>>> GetPremiumIndexKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
