@@ -203,8 +203,8 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-        => spotMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceSymbolInfo symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
+        => spotMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     protected override Task<Result<List<CollectorModels.Models.BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();

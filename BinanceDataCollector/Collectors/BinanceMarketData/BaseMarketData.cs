@@ -18,26 +18,40 @@ internal abstract class BaseMarketData
 
     protected abstract string MarketPathSegment { get; }
     protected abstract string MarketDataRemotePathSegment { get; }
-    public abstract Task<Result<MarketDataDownloadBatch>> DownloadAggTradesAsync(string symbol, DateTime startTime, string tempSymbolPath, CancellationToken ct = default);
+    public abstract Task<Result<MarketDataDownloadBatch>> DownloadAggTradesAsync(
+        string symbol,
+        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        string tempSymbolPath,
+        CancellationToken ct = default);
 
-    protected async Task<Result<MarketDataDownloadBatch>> DownloadAsync(string dataType, string symbol, DateTime startTime, string tempSymbolPath, CancellationToken ct = default)
+    protected async Task<Result<MarketDataDownloadBatch>> DownloadAsync(
+        string dataType,
+        string symbol,
+        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        string tempSymbolPath,
+        CancellationToken ct = default)
     {
         try
         {
             DateTime todayUtc = DateTime.UtcNow.Date;
             DateTime lastDailyDate = todayUtc.AddDays(-1);
-            if (startTime.Date > lastDailyDate)
+            DateTime downloadStartTime = syncState.DownloadStartTime.Date;
+            DateTime? monthlyLatestPeriodStart = syncState.MonthlyLatestPeriodStart?.Date;
+            DateTime? dailyLatestPeriodStart = syncState.DailyLatestPeriodStart?.Date;
+            DateTime monthlyStart = monthlyLatestPeriodStart?.AddMonths(1) ?? new DateTime(downloadStartTime.Year, downloadStartTime.Month, 1);
+            DateTime dailyStartDate = dailyLatestPeriodStart?.AddDays(1) ?? downloadStartTime;
+
+            if (monthlyStart > lastDailyDate && dailyStartDate > lastDailyDate)
                 return Result.Ok(CreateEmptyBatch(dataType, symbol));
 
             DateTime currentMonthStart = new(todayUtc.Year, todayUtc.Month, 1);
-            DateTime startMonth = new(startTime.Year, startTime.Month, 1);
             DateTime lastCompletedMonth = currentMonthStart.AddMonths(-1);
 
             List<MarketDataDownloadFile> files = [];
-            HashSet<DateTime> monthlyCoveredMonths = [];
-            if (startMonth <= lastCompletedMonth)
+            DateTime? maxMonthlyCoveredMonth = monthlyLatestPeriodStart;
+            if (monthlyStart <= lastCompletedMonth)
             {
-                IReadOnlyList<string> monthlyFileNames = await GetAvailableMonthlyFileNamesAsync(dataType, symbol, startMonth, lastCompletedMonth, ct);
+                IReadOnlyList<string> monthlyFileNames = await GetAvailableMonthlyFileNamesAsync(dataType, symbol, monthlyStart, lastCompletedMonth, ct);
                 foreach (string fileName in monthlyFileNames)
                 {
                     MarketDataDownloadFile file = CreateDownloadFile(
@@ -49,15 +63,16 @@ internal abstract class BaseMarketData
                     if (await EnsureDownloadFileAsync(file, ct))
                     {
                         files.Add(file);
-                        monthlyCoveredMonths.Add(new DateTime(ExtractMonth(fileName, symbol, dataType).Year, ExtractMonth(fileName, symbol, dataType).Month, 1));
+                        DateTime downloadedMonth = ExtractMonth(fileName, symbol, dataType);
+                        if (!maxMonthlyCoveredMonth.HasValue || downloadedMonth > maxMonthlyCoveredMonth.Value)
+                            maxMonthlyCoveredMonth = downloadedMonth;
                     }
                 }
             }
 
-            DateTime dailyStartDate = startTime.Date;
             if (dailyStartDate <= lastDailyDate)
             {
-                IReadOnlyList<string> dailyFileNames = await GetAvailableDailyFileNamesAsync(dataType, symbol, dailyStartDate, lastDailyDate, monthlyCoveredMonths, ct);
+                IReadOnlyList<string> dailyFileNames = await GetAvailableDailyFileNamesAsync(dataType, symbol, dailyStartDate, lastDailyDate, maxMonthlyCoveredMonth, ct);
                 foreach (string fileName in dailyFileNames)
                 {
                     MarketDataDownloadFile file = CreateDownloadFile(
@@ -191,7 +206,7 @@ internal abstract class BaseMarketData
             .ToArray();
     }
 
-    private async Task<IReadOnlyList<string>> GetAvailableDailyFileNamesAsync(string dataType, string symbol, DateTime startDate, DateTime lastDailyDate, IReadOnlySet<DateTime> monthlyCoveredMonths, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> GetAvailableDailyFileNamesAsync(string dataType, string symbol, DateTime startDate, DateTime lastDailyDate, DateTime? maxMonthlyCoveredMonth, CancellationToken ct)
     {
         string prefix = BuildPrefix(dataType, symbol, "daily");
         string marker = prefix;
@@ -204,7 +219,7 @@ internal abstract class BaseMarketData
                 && fileDate >= startDate
                 && fileDate <= lastDailyDate)
             .Where(fileName => TryParsePeriod(fileName, symbol, dataType, "yyyy-MM-dd", out DateTime fileDate)
-                && !monthlyCoveredMonths.Contains(new DateTime(fileDate.Year, fileDate.Month, 1)))
+                && (!maxMonthlyCoveredMonth.HasValue || new DateTime(fileDate.Year, fileDate.Month, 1) > maxMonthlyCoveredMonth.Value))
             .OrderBy(fileName => fileName, StringComparer.Ordinal)
             .ToArray();
     }

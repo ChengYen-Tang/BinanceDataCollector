@@ -270,8 +270,8 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesCoinSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-        => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesCoinSymbolInfo symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
+        => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     public override async Task<DateTime> GetLastFundingTimeAsync(BinanceFuturesCoinSymbolInfo symbol, CancellationToken ct = default)
     {

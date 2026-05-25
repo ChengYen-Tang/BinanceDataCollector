@@ -283,14 +283,19 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         return new AsyncWorkItem<IList<T11>>(InsertBasisAsync, result.Value, ct);
     }
 
-    public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateAggTradesAsync(
+        T symbol,
+        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        CancellationToken ct = default)
     {
-        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", BaseMarketData.AggTradesDataType, symbol, startTime);
-        Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", BaseMarketData.AggTradesDataType, symbol, startTime);
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}, MonthlyLatestPeriodStart: {MonthlyLatestPeriodStart}, DailyLatestPeriodStart: {DailyLatestPeriodStart}",
+            BaseMarketData.AggTradesDataType, symbol, syncState.DownloadStartTime, syncState.MonthlyLatestPeriodStart, syncState.DailyLatestPeriodStart);
+        Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, syncState, ct);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}, MonthlyLatestPeriodStart: {MonthlyLatestPeriodStart}, DailyLatestPeriodStart: {DailyLatestPeriodStart}",
+            BaseMarketData.AggTradesDataType, symbol, syncState.DownloadStartTime, syncState.MonthlyLatestPeriodStart, syncState.DailyLatestPeriodStart);
         if (result.IsFailed)
         {
-            LogSyncFailure(BaseMarketData.AggTradesDataType, symbol, result.Errors[0].Message, startTime: startTime);
+            LogSyncFailure(BaseMarketData.AggTradesDataType, symbol, result.Errors[0].Message, startTime: syncState.DownloadStartTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertAggTradesAsync, null, ct);
@@ -783,6 +788,14 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         logger.LogDebug("Finish persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
     }
 
+    public virtual Task<(DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart)> GetLastAggTradesAsync(T symbol, CancellationToken ct = default)
+    {
+        string symbolPath = GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, GetSymbolName(symbol));
+        DateTime? lastMonthlyDate = GetLastCompletedPeriod(Path.Combine(symbolPath, "Monthly"), "yyyy-MM");
+        DateTime? lastDailyDate = GetLastCompletedPeriod(Path.Combine(symbolPath, "Daily"), "yyyy-MM-dd");
+        return Task.FromResult((yearsReserved, lastMonthlyDate, lastDailyDate));
+    }
+
     public abstract Task<DateTime> GetLastTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastPremiumIndexTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
     public abstract Task<DateTime> GetLastIndexPriceTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
@@ -803,7 +816,10 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
 
     protected abstract Task<Result<List<T>>> GetMarketAsync(CancellationToken ct = default);
 
-    protected abstract Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(
+        T symbol,
+        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        CancellationToken ct = default);
     protected abstract Task<Result<List<T1>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T2>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<T3>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
@@ -888,6 +904,28 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
             throw new InvalidDataException($"Invalid market data file name: {file.FileName}");
 
         return fileNameWithoutExtension[prefix.Length..];
+    }
+
+    private static DateTime? GetLastCompletedPeriod(string rootDirectory, string format)
+    {
+        if (!Directory.Exists(rootDirectory))
+            return null;
+
+        DateTime? latest = null;
+        foreach (string directory in Directory.EnumerateDirectories(rootDirectory))
+        {
+            string periodName = Path.GetFileName(directory);
+            if (!File.Exists(Path.Combine(directory, "_SUCCESS")))
+                continue;
+
+            if (!DateTime.TryParseExact(periodName, format, null, System.Globalization.DateTimeStyles.None, out DateTime parsed))
+                continue;
+
+            if (!latest.HasValue || parsed > latest.Value)
+                latest = parsed;
+        }
+
+        return latest;
     }
 
     private static async Task ExtractArchiveWithChecksumsAsync(string archivePath, string destinationDirectory, CancellationToken ct)

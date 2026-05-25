@@ -269,8 +269,8 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-        => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesUsdtSymbolInfo symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
+        => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     protected override async Task<Result<List<FuturesUsdtBinancePremiumIndexKline>>> GetPremiumIndexKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {

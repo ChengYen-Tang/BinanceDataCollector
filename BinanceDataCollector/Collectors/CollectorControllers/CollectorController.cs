@@ -58,6 +58,11 @@ internal abstract class CollectorController<T, T1, T2, T3, T4, T5, T6, T7, T8, T
         AsyncWorkItem<T, KlineInterval, DateTime> workItem = new(GatherKlinesAsync, symbol, interval, startTime, ct, BuildWorkItemDescription("Klines", symbol, interval, startTime));
         if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.GatherChannel.Writer.WriteAsync(workItem, ct);
+        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) aggTradesSyncState = await storageController.GetLastAggTradesAsync(symbol, ct);
+        AsyncWorkItem<T, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart)> aggTradesWorkItem
+            = new(GatherAggTradesAsync, symbol, aggTradesSyncState, ct, BuildWorkItemDescription("AggTrades", symbol, startTime: aggTradesSyncState.DownloadStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(aggTradesWorkItem, ct);
         if (!IsFutures)
             return;
         DateTime premiumIndexStartTime = await storageController.GetLastPremiumIndexTimeAsync(symbol, interval, ct);
@@ -114,6 +119,13 @@ internal abstract class CollectorController<T, T1, T2, T3, T4, T5, T6, T7, T8, T
     private async Task GatherKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         AsyncWorkItem<IList<T1>> workItem = await storageController.UpdateKlinesAsync(symbol, interval, startTime, ct);
+        if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
+    }
+
+    private async Task GatherAggTradesAsync(T symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
+    {
+        AsyncWorkItem<BinanceMarketData.MarketDataDownloadBatch?> workItem = await storageController.UpdateAggTradesAsync(symbol, syncState, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
