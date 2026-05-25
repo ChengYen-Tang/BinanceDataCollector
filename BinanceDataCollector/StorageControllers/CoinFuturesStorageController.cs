@@ -2,6 +2,7 @@
 using Binance.Net.Enums;
 using Binance.Net.Objects.Models.Futures;
 using BinanceDataCollector.Collectors.BinanceApi;
+using MarketDataBase = BinanceDataCollector.Collectors.BinanceMarketData.BaseMarketData;
 using MarketDataDownloadBatch = BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch;
 using MarketDataCoinFutures = BinanceDataCollector.Collectors.BinanceMarketData.CoinFutures;
 using CollectorModels;
@@ -38,7 +39,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
     protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market); } }
     protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market); } }
     protected override bool IsFutures => true;
-    private static IReadOnlyCollection<string> MarketDataTypes => ["AggTrades"];
+    private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
 
     protected override string GetSymbolName(BinanceFuturesCoinSymbolInfo symbol)
         => symbol.Name;
@@ -270,7 +271,7 @@ internal class CoinFuturesStorageController : StorageController<BinanceFuturesCo
     }
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesCoinSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-        => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath("AggTrades", symbol.Name), ct);
+        => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     public override async Task<DateTime> GetLastFundingTimeAsync(BinanceFuturesCoinSymbolInfo symbol, CancellationToken ct = default)
     {

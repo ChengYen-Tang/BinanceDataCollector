@@ -2,8 +2,6 @@ namespace BinanceDataCollector.Collectors.BinanceMarketData;
 
 internal sealed class Spot : BaseMarketData
 {
-    private const string AggTradesDataType = "aggTrades";
-
     protected override string MarketPathSegment => "Spot";
     protected override string MarketDataRemotePathSegment => "spot";
 

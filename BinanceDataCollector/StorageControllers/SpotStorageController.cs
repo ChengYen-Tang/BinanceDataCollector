@@ -1,6 +1,7 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Spot;
 using BinanceDataCollector.Collectors.BinanceApi;
+using MarketDataBase = BinanceDataCollector.Collectors.BinanceMarketData.BaseMarketData;
 using MarketDataDownloadBatch = BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch;
 using SpotMarketData = BinanceDataCollector.Collectors.BinanceMarketData.Spot;
 using CollectorModels;
@@ -37,7 +38,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     protected override string TakerLongShortRatioPath => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
     protected override string BasisPath => throw new NotSupportedException("Spot market does not support basis.");
     protected override bool IsFutures => false;
-    private static IReadOnlyCollection<string> MarketDataTypes => ["AggTrades"];
+    private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
 
     protected override string GetSymbolName(BinanceSymbolInfo symbol)
         => symbol.Name;
@@ -203,7 +204,7 @@ internal class SpotStorageController : StorageController<BinanceSymbolInfo, Spot
     }
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-        => spotMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath("AggTrades", symbol.Name), ct);
+        => spotMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     protected override Task<Result<List<CollectorModels.Models.BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(BinanceSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();

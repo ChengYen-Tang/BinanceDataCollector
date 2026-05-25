@@ -2,8 +2,6 @@ namespace BinanceDataCollector.Collectors.BinanceMarketData;
 
 internal sealed class UsdFutures : BaseMarketData
 {
-    private const string AggTradesDataType = "aggTrades";
-
     protected override string MarketPathSegment => "UsdFutures";
     protected override string MarketDataRemotePathSegment => "futures/um";
 

@@ -9,6 +9,8 @@ using Magicodes.ExporterAndImporter.Csv;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Diagnostics;
+using System.IO.Compression;
+using System.Security.Cryptography;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -283,12 +285,12 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
 
     public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", "AggTrades", symbol, startTime);
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", BaseMarketData.AggTradesDataType, symbol, startTime);
         Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, startTime, ct);
-        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", "AggTrades", symbol, startTime);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", BaseMarketData.AggTradesDataType, symbol, startTime);
         if (result.IsFailed)
         {
-            LogSyncFailure("AggTrades", symbol, result.Errors[0].Message, startTime: startTime);
+            LogSyncFailure(BaseMarketData.AggTradesDataType, symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertAggTradesAsync, null, ct);
@@ -725,13 +727,60 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
         }
     }
 
-    protected virtual Task InsertAggTradesAsync(MarketDataDownloadBatch? batch, CancellationToken ct = default)
+    protected virtual async Task InsertAggTradesAsync(MarketDataDownloadBatch? batch, CancellationToken ct = default)
     {
         if (batch is null || batch.Files.Count == 0)
-            return Task.CompletedTask;
+            return;
 
-        logger.LogDebug("AggTrades temp batch ready. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
-        return Task.CompletedTask;
+        string symbolPath = GetMarketDataSymbolPath(batch.DataType, batch.Symbol);
+        Directory.CreateDirectory(symbolPath);
+        logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
+
+        foreach (MarketDataDownloadFile file in batch.Files)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string periodDirectory = GetAggTradesPeriodDirectoryName(file);
+            string periodRootDirectory = Path.Combine(symbolPath, GetPeriodFolderName(file.Period));
+            string destinationDirectory = Path.Combine(periodRootDirectory, periodDirectory);
+            string stagingDirectory = destinationDirectory + ".__staging";
+
+            if (Directory.Exists(stagingDirectory))
+                Directory.Delete(stagingDirectory, true);
+
+            Directory.CreateDirectory(stagingDirectory);
+            try
+            {
+                await ExtractArchiveWithChecksumsAsync(file.TempZipPath, stagingDirectory, ct);
+                await File.WriteAllTextAsync(Path.Combine(stagingDirectory, "_SUCCESS"), string.Empty, ct);
+
+                if (Directory.Exists(destinationDirectory))
+                    Directory.Delete(destinationDirectory, true);
+
+                Directory.CreateDirectory(periodRootDirectory);
+                Directory.Move(stagingDirectory, destinationDirectory);
+                DeleteFileIfExists(file.TempZipPath);
+                DeleteFileIfExists(file.TempChecksumPath);
+                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath));
+                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempChecksumPath));
+            }
+            catch (OperationCanceledException)
+            {
+                if (Directory.Exists(stagingDirectory))
+                    Directory.Delete(stagingDirectory, true);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (Directory.Exists(stagingDirectory))
+                    Directory.Delete(stagingDirectory, true);
+                logger.LogError(ex,
+                    "Persist aggTrades archive failed. Market: {Market}, Symbol: {Symbol}, Period: {Period}, FileName: {FileName}",
+                    batch.MarketPathSegment, batch.Symbol, file.Period, file.FileName);
+            }
+        }
+
+        logger.LogDebug("Finish persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
     }
 
     public abstract Task<DateTime> GetLastTimeAsync(T symbol, KlineInterval interval, CancellationToken ct = default);
@@ -825,6 +874,68 @@ internal abstract class StorageController<T, T1, T2, T3, T4, T5, T6, T7, T8, T9,
 
     protected string GetMarketDataTempSymbolPath(string dataType, string symbol)
         => Path.Combine(MarketDataTempPath, dataType, MarketPathSegment, symbol);
+
+    private static string GetPeriodFolderName(string period)
+        => period.Equals("monthly", StringComparison.OrdinalIgnoreCase) ? "Monthly"
+        : period.Equals("daily", StringComparison.OrdinalIgnoreCase) ? "Daily"
+        : throw new InvalidDataException($"Unsupported market data period: {period}");
+
+    private static string GetAggTradesPeriodDirectoryName(MarketDataDownloadFile file)
+    {
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(file.FileName);
+        string prefix = $"{file.Symbol}-{file.DataType}-";
+        if (!fileNameWithoutExtension.StartsWith(prefix, StringComparison.Ordinal))
+            throw new InvalidDataException($"Invalid market data file name: {file.FileName}");
+
+        return fileNameWithoutExtension[prefix.Length..];
+    }
+
+    private static async Task ExtractArchiveWithChecksumsAsync(string archivePath, string destinationDirectory, CancellationToken ct)
+    {
+        int extractedFileCount = 0;
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(entry.Name))
+                continue;
+
+            string entryPath = Path.Combine(destinationDirectory, entry.Name);
+            await using (Stream source = entry.Open())
+            await using (FileStream destination = File.Create(entryPath))
+                await source.CopyToAsync(destination, ct);
+
+            string checksum = await ComputeSha256Async(entryPath, ct);
+            await File.WriteAllTextAsync(Path.Combine(destinationDirectory, entry.Name + ".CHECKSUM"), $"{checksum}  {entry.Name}", ct);
+            extractedFileCount++;
+        }
+
+        if (extractedFileCount == 0)
+            throw new InvalidDataException($"Archive does not contain any files: {archivePath}");
+    }
+
+    private static async Task<string> ComputeSha256Async(string path, CancellationToken ct)
+    {
+        await using FileStream stream = File.OpenRead(path);
+        byte[] hash = await SHA256.HashDataAsync(stream, ct);
+        return Convert.ToHexString(hash);
+    }
+
+    private static void DeleteFileIfExists(string path)
+    {
+        if (File.Exists(path))
+            File.Delete(path);
+    }
+
+    private static void DeleteDirectoryIfEmpty(string? path)
+    {
+        while (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+        {
+            string? parentPath = Path.GetDirectoryName(path);
+            Directory.Delete(path);
+            path = parentPath;
+        }
+    }
 
     protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
         => $"{symbol}-{interval}-{closeTime:s}";

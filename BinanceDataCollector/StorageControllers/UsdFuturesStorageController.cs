@@ -1,6 +1,7 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Futures;
 using BinanceDataCollector.Collectors.BinanceApi;
+using MarketDataBase = BinanceDataCollector.Collectors.BinanceMarketData.BaseMarketData;
 using MarketDataDownloadBatch = BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch;
 using MarketDataUsdFutures = BinanceDataCollector.Collectors.BinanceMarketData.UsdFutures;
 using CollectorModels;
@@ -37,7 +38,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
     protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market); } }
     protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market); } }
     protected override bool IsFutures => true;
-    private IReadOnlyCollection<string> marketDataTypes => ["AggTrades"];
+    private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
 
     protected override string GetSymbolName(BinanceFuturesUsdtSymbolInfo symbol)
         => symbol.Name;
@@ -63,7 +64,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         ], LogDropStatus, ct);
         
         await db.BinanceFuturesUsdtSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
-        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, marketDataTypes, ct);
+        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, MarketDataTypes, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -269,7 +270,7 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
     }
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
-        => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath("AggTrades", symbol.Name), ct);
+        => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, startTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     protected override async Task<Result<List<FuturesUsdtBinancePremiumIndexKline>>> GetPremiumIndexKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
