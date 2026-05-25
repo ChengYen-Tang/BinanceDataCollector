@@ -36,92 +36,13 @@ internal static class CsvExportArchiveHelper
     public static async Task FinalizeArchiveAsync(CancellationToken ct = default)
     {
         Directory.CreateDirectory(DataPath);
-        Directory.CreateDirectory(TmpPath);
+        DeleteFileIfExists(ArchivePath);
+        DeleteFileIfExists(HashPath);
 
-        string archiveStagingPath = Path.Combine(TmpPath, ArchiveFileName + ".tmp");
-        string hashStagingPath = Path.Combine(TmpPath, HashFileName + ".tmp");
-        string archiveBackupPath = Path.Combine(TmpPath, ArchiveFileName + ".bak");
-        string hashBackupPath = Path.Combine(TmpPath, HashFileName + ".bak");
+        ZipFile.CreateFromDirectory(WorkRootPath, ArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
 
-        try
-        {
-            DeleteFileIfExists(archiveStagingPath);
-            DeleteFileIfExists(hashStagingPath);
-            DeleteFileIfExists(archiveBackupPath);
-            DeleteFileIfExists(hashBackupPath);
-
-            ZipFile.CreateFromDirectory(WorkRootPath, archiveStagingPath, CompressionLevel.Optimal, includeBaseDirectory: false);
-
-            string hashText = await ComputeSha256Async(archiveStagingPath, ct);
-            await File.WriteAllTextAsync(hashStagingPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);
-
-            PublishArtifacts(archiveStagingPath, hashStagingPath, archiveBackupPath, hashBackupPath);
-        }
-        finally
-        {
-            DeleteFileIfExists(archiveStagingPath);
-            DeleteFileIfExists(hashStagingPath);
-            DeleteFileIfExists(archiveBackupPath);
-            DeleteFileIfExists(hashBackupPath);
-        }
-    }
-
-    private static void PublishArtifacts(string archiveStagingPath, string hashStagingPath, string archiveBackupPath, string hashBackupPath)
-    {
-        bool archivePublished = false;
-        bool hashPublished = false;
-        try
-        {
-            ReplaceFile(archiveStagingPath, ArchivePath, archiveBackupPath);
-            archivePublished = true;
-            ReplaceFile(hashStagingPath, HashPath, hashBackupPath);
-            hashPublished = true;
-        }
-        catch
-        {
-            if (hashPublished)
-                RollbackFile(HashPath, hashBackupPath);
-            else
-                RollbackCreatedFile(HashPath, hashBackupPath);
-
-            if (archivePublished)
-                RollbackFile(ArchivePath, archiveBackupPath);
-            else
-                RollbackCreatedFile(ArchivePath, archiveBackupPath);
-
-            throw;
-        }
-
-        DeleteFileIfExists(archiveBackupPath);
-        DeleteFileIfExists(hashBackupPath);
-    }
-
-    private static void ReplaceFile(string sourcePath, string destinationPath, string backupPath)
-    {
-        if (File.Exists(destinationPath))
-        {
-            File.Replace(sourcePath, destinationPath, backupPath, ignoreMetadataErrors: true);
-            return;
-        }
-
-        File.Move(sourcePath, destinationPath);
-    }
-
-    private static void RollbackFile(string destinationPath, string backupPath)
-    {
-        if (!File.Exists(backupPath))
-            return;
-
-        if (File.Exists(destinationPath))
-            File.Replace(backupPath, destinationPath, null, ignoreMetadataErrors: true);
-        else
-            File.Move(backupPath, destinationPath);
-    }
-
-    private static void RollbackCreatedFile(string destinationPath, string backupPath)
-    {
-        DeleteFileIfExists(destinationPath);
-        DeleteFileIfExists(backupPath);
+        string hashText = await ComputeSha256Async(ArchivePath, ct);
+        await File.WriteAllTextAsync(HashPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);
     }
 
     private static void DeleteFileIfExists(string path)
