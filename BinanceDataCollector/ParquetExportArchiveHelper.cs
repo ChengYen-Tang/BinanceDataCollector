@@ -4,7 +4,7 @@ using System.Text;
 
 namespace BinanceDataCollector;
 
-internal static class CsvExportArchiveHelper
+internal static class ParquetExportArchiveHelper
 {
     public const string ArchiveFileName = "BinanceDataCollector.zip";
     private const string HashFileName = ArchiveFileName + ".sha256";
@@ -12,7 +12,7 @@ internal static class CsvExportArchiveHelper
 
     public static string DataPath { get; } = Path.Combine(BasePath, "Data");
     public static string TmpPath { get; } = Path.Combine(BasePath, "Tmp");
-    public static string WorkRootPath { get; } = Path.Combine(TmpPath, "CsvExport");
+    public static string WorkRootPath { get; } = Path.Combine(TmpPath, "ParquetExport");
     public static string ArchivePath { get; } = Path.Combine(DataPath, ArchiveFileName);
     public static string HashPath { get; } = Path.Combine(DataPath, HashFileName);
 
@@ -39,7 +39,7 @@ internal static class CsvExportArchiveHelper
         DeleteFileIfExists(ArchivePath);
         DeleteFileIfExists(HashPath);
 
-        ZipFile.CreateFromDirectory(WorkRootPath, ArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
+        ZipFile.CreateFromDirectory(WorkRootPath, ArchivePath, CompressionLevel.NoCompression, includeBaseDirectory: false);
 
         string hashText = await ComputeSha256Async(ArchivePath, ct);
         await File.WriteAllTextAsync(HashPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);

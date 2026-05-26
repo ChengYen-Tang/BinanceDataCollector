@@ -213,11 +213,11 @@ internal abstract class CollectorController<T, T1, T2, T3, T4, T5, T6, T7, T8, T
         return description;
     }
 
-    public Task ExportToCsvAsync(CancellationToken ct = default)
+    public Task ExportToParquetAsync(CancellationToken ct = default)
     {
         if (!IsEnable)
             return Task.CompletedTask;
-        return storageController.ExportToCsvAsync(ct);
+        return storageController.ExportToParquetAsync(ct);
     }
 }
 

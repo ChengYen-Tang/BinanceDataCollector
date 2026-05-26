@@ -3,5 +3,5 @@
 internal interface ICollectorController
 {
     Task GatherAsync(CancellationToken ct = default);
-    Task ExportToCsvAsync(CancellationToken ct = default);
+    Task ExportToParquetAsync(CancellationToken ct = default);
 }

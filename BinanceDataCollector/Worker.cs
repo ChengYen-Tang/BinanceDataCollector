@@ -87,9 +87,9 @@ public class HangfireJob
             logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
             productionLine.ResetEvent();
 
-            Task csvArchiveTask = ExportCsvArchiveAsync(controllers, ct);
+            Task parquetArchiveTask = ExportParquetArchiveAsync(controllers, ct);
             Task marketDataArchiveTask = PackageMarketDataArchiveAsync(ct);
-            await Task.WhenAll(csvArchiveTask, marketDataArchiveTask);
+            await Task.WhenAll(parquetArchiveTask, marketDataArchiveTask);
         }
         finally
         {
@@ -98,24 +98,24 @@ public class HangfireJob
         }
     }
 
-    private async Task ExportCsvArchiveAsync(ICollectorController[] controllers, CancellationToken ct)
+    private async Task ExportParquetArchiveAsync(ICollectorController[] controllers, CancellationToken ct)
     {
-        CsvExportArchiveHelper.PrepareWorkRoot();
+        ParquetExportArchiveHelper.PrepareWorkRoot();
         try
         {
             foreach (ICollectorController controller in controllers)
             {
-                logger.LogInformation("Start exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
-                await controller.ExportToCsvAsync(ct);
-                logger.LogInformation("Finish exporting csv. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+                logger.LogInformation("Start exporting parquet. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
+                await controller.ExportToParquetAsync(ct);
+                logger.LogInformation("Finish exporting parquet. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
             }
 
-            await CsvExportArchiveHelper.FinalizeArchiveAsync(ct);
-            logger.LogInformation("Finish packaging csv archive at: {time}", DateTimeOffset.Now);
+            await ParquetExportArchiveHelper.FinalizeArchiveAsync(ct);
+            logger.LogInformation("Finish packaging parquet archive at: {time}", DateTimeOffset.Now);
         }
         finally
         {
-            CsvExportArchiveHelper.CleanupWorkRoot();
+            ParquetExportArchiveHelper.CleanupWorkRoot();
         }
     }
 
