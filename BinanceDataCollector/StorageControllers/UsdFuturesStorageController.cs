@@ -1,4 +1,5 @@
 ﻿using Binance.Net.Interfaces.Clients;
+using Binance.Net.Enums;
 using Binance.Net.Objects.Models.Futures;
 using BinanceDataCollector.Collectors.BinanceApi;
 using MarketDataBase = BinanceDataCollector.Collectors.BinanceMarketData.BaseMarketData;
@@ -15,7 +16,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsdtSymbolInfo, FuturesUsdtBinanceKline, FuturesUsdtBinancePremiumIndexKline, FuturesUsdtBinanceIndexPriceKline, FuturesUsdtBinanceMarkPriceKline, FuturesUsdtFundingRate, FuturesUsdtOpenInterestHistory, FuturesUsdtTopLongShortPositionRatio, FuturesUsdtTopLongShortAccountRatio, FuturesUsdtGlobalLongShortAccountRatio, FuturesUsdtTakerLongShortRatio, FuturesUsdtBasis>
+internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
 {
     private const string Market = "UsdFutures";
     private readonly UsdFutures usdFutures;
@@ -25,114 +26,78 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         : base(serviceProvider, logger) => (usdFutures, usdFuturesMarketData) = (new(client, configuration.GetSection("IgnoneCoins:UsdFutures").Get<string[]>() ?? []), new());
 
     protected override string MarketPathSegment => Market;
-    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, Market); } }
-    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market); } }
-    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, Market); } }
-    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, Market); } }
-    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, Market); } }
-    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, Market); } }
-    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, Market); } }
-    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, Market); } }
-    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, Market); } }
-    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, Market); } }
-    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market); } }
-    protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market); } }
+    protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "SymbolInfo.duckdb"); } }
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market + ".duckdb"); } }
+    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, Market + ".duckdb"); } }
+    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, Market + ".duckdb"); } }
+    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, Market + ".duckdb"); } }
+    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, Market + ".duckdb"); } }
+    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, Market + ".duckdb"); } }
+    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, Market + ".duckdb"); } }
+    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, Market + ".duckdb"); } }
+    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, Market + ".duckdb"); } }
+    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market + ".duckdb"); } }
+    protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market + ".duckdb"); } }
     protected override bool IsFutures => true;
     private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
 
-    protected override string GetSymbolName(BinanceFuturesUsdtSymbolInfo symbol)
+    protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
 
-    protected override Task<List<string>> GetExistingSymbolNamesAsync(BinanceDbContext db, CancellationToken ct = default)
-        => db.BinanceFuturesUsdtSymbolInfos.AsNoTracking().Select(item => item.Name).ToListAsync(ct);
+    protected override Task<List<string>> GetExistingSymbolNamesAsync(CancellationToken ct = default)
+        => GetStoredSymbolNamesAsync(ct);
 
-    protected override async Task DeleteDelistedSymbolsAsync(BinanceDbContext db, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
+    protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        await db.DropShardingTablesAsync(delistedSymbols,
+        await DeleteSymbolTablesAsync(
         [
-            nameof(BinanceDbContext.FuturesUsdtBinanceKlines),
-            nameof(BinanceDbContext.FuturesUsdtBinancePremiumIndexKlines),
-            nameof(BinanceDbContext.FuturesUsdtBinanceIndexPriceKlines),
-            nameof(BinanceDbContext.FuturesUsdtBinanceMarkPriceKlines),
-            nameof(BinanceDbContext.FuturesUsdtFundingRates),
-            nameof(BinanceDbContext.FuturesUsdtOpenInterestHistories),
-            nameof(BinanceDbContext.FuturesUsdtBasisHistories),
-            nameof(BinanceDbContext.FuturesUsdtTopLongShortPositionRatios),
-            nameof(BinanceDbContext.FuturesUsdtTopLongShortAccountRatios),
-            nameof(BinanceDbContext.FuturesUsdtGlobalLongShortAccountRatios),
-            nameof(BinanceDbContext.FuturesUsdtTakerLongShortRatios),
-        ], LogDropStatus, ct);
-        
-        await db.BinanceFuturesUsdtSymbolInfos.Where(item => delistedSymbols.Contains(item.Name)).ExecuteDeleteAsync(ct);
+            KlinePath,
+            PremiumIndexKlinePath,
+            IndexPriceKlinePath,
+            MarkPriceKlinePath,
+            FundingRatePath,
+            OpenInterestPath,
+            BasisPath,
+            TopLongShortPositionRatioPath,
+            TopLongShortAccountRatioPath,
+            GlobalLongShortAccountRatioPath,
+            TakerLongShortRatioPath,
+        ], delistedSymbols, ct);
         await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, MarketDataTypes, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
     {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        List<string> symbolNames = await db.BinanceFuturesUsdtSymbolInfos
-            .AsNoTracking()
-            .Select(s => s.Name)
-            .ToListAsync(ct);
+        List<string> symbolNames = await GetStoredSymbolNamesAsync(ct);
 
         foreach (string symbolName in symbolNames)
         {
-            await db.FuturesUsdtBinanceKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtBinancePremiumIndexKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtBinanceIndexPriceKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtBinanceMarkPriceKlines.Where(item => item.OpenTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtFundingRates.Where(item => item.FundingTime < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtOpenInterestHistories.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtBasisHistories.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtTopLongShortPositionRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtTopLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtGlobalLongShortAccountRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
-            await db.FuturesUsdtTakerLongShortRatios.Where(item => item.Timestamp < yearsReserved && item.SymbolInfoId == symbolName).ExecuteDeleteAsync(ct);
+            await DeleteSymbolRowsBeforeAsync(KlinePath, symbolName, nameof(Kline.OpenTime), ct);
+            await DeleteSymbolRowsBeforeAsync(PremiumIndexKlinePath, symbolName, nameof(PremiumIndexKline.OpenTime), ct);
+            await DeleteSymbolRowsBeforeAsync(IndexPriceKlinePath, symbolName, nameof(PremiumIndexKline.OpenTime), ct);
+            await DeleteSymbolRowsBeforeAsync(MarkPriceKlinePath, symbolName, nameof(PremiumIndexKline.OpenTime), ct);
+            await DeleteSymbolRowsBeforeAsync(FundingRatePath, symbolName, nameof(FundingRate.FundingTime), ct);
+            await DeleteSymbolRowsBeforeAsync(OpenInterestPath, symbolName, nameof(OpenInterestHistory.Timestamp), ct);
+            await DeleteSymbolRowsBeforeAsync(BasisPath, symbolName, nameof(FuturesBasisCsv.Timestamp), ct);
+            await DeleteSymbolRowsBeforeAsync(TopLongShortPositionRatioPath, symbolName, nameof(LongShortRatioCsv.Timestamp), ct);
+            await DeleteSymbolRowsBeforeAsync(TopLongShortAccountRatioPath, symbolName, nameof(LongShortRatioCsv.Timestamp), ct);
+            await DeleteSymbolRowsBeforeAsync(GlobalLongShortAccountRatioPath, symbolName, nameof(LongShortRatioCsv.Timestamp), ct);
+            await DeleteSymbolRowsBeforeAsync(TakerLongShortRatioPath, symbolName, nameof(TakerLongShortRatioCsv.Timestamp), ct);
             await DeleteOldAggTradesDataAsync(symbolName, ct);
         }
     }
 
-    public override async Task<DateTime> GetLastTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtBinanceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtBinanceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
+        => GetLastTimestampAsync(KlinePath, symbol.Name, nameof(Kline.CloseTime), null, ct);
 
-    public override async Task<DateTime> GetLastPremiumIndexTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastPremiumIndexTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
+        => GetLastTimestampAsync(PremiumIndexKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
 
-    public override async Task<DateTime> GetLastIndexPriceTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtBinanceIndexPriceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtBinanceIndexPriceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastIndexPriceTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
+        => GetLastTimestampAsync(IndexPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
 
-    public override async Task<DateTime> GetLastMarkPriceTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtBinanceMarkPriceKlines.AsNoTracking().AnyAsync(item => item.Interval == interval && item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtBinanceMarkPriceKlines.AsNoTracking().Where(item => item.Interval == interval && item.SymbolInfoId == symbol.Name).MaxAsync(item => item.CloseTime, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastMarkPriceTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
+        => GetLastTimestampAsync(MarkPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
 
     protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
     {
@@ -245,12 +210,12 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         return Result.Ok(klines);
     }
 
-    protected override async Task<Result<List<FuturesUsdtBinanceKline>>> GetKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<Kline>>> GetKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         Result<List<IBinanceKline>> result = await usdFutures.GetKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceKline()
+        return Result.Ok(result.Value.AsParallel().Select(kline => new Kline
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
@@ -261,108 +226,91 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
             TakerBuyBaseVolume = decimal.ToDouble(kline.TakerBuyBaseVolume),
             TakerBuyQuoteVolume = decimal.ToDouble(kline.TakerBuyQuoteVolume),
             TradeCount = kline.TradeCount,
-            Interval = interval,
-            OpenTime = kline.OpenTime,
-            CloseTime = kline.CloseTime,
-            SymbolInfo = symbol,
-            SymbolInfoId = symbol.Name,
-            Id = CombineKlineId(symbol.Name, interval, kline.CloseTime)
+            OpenTime = ToUnixMilliseconds(kline.OpenTime),
+            CloseTime = ToUnixMilliseconds(kline.CloseTime)
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(BinanceFuturesUsdtSymbolInfo symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
         => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
-    protected override async Task<Result<List<FuturesUsdtBinancePremiumIndexKline>>> GetPremiumIndexKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetPremiumIndexKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinancePremiumIndexKline()
+        return Result.Ok(result.Value.AsParallel().Select(kline => new PremiumIndexKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
             HighPrice = decimal.ToDouble(kline.HighPrice),
             LowPrice = decimal.ToDouble(kline.LowPrice),
-            Interval = interval,
-            OpenTime = kline.OpenTime,
-            CloseTime = kline.CloseTime,
-            SymbolInfo = symbol,
-            SymbolInfoId = symbol.Name,
-            Id = CombineKlineId(symbol.Name, interval, kline.CloseTime)
+            OpenTime = ToUnixMilliseconds(kline.OpenTime),
+            CloseTime = ToUnixMilliseconds(kline.CloseTime)
         }).ToList());
     }
 
-    protected override async Task<Result<List<FuturesUsdtBinanceIndexPriceKline>>> GetIndexPriceKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<PremiumIndexKline>>> GetIndexPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetIndexPriceKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceIndexPriceKline()
+        return Result.Ok(result.Value.AsParallel().Select(kline => new PremiumIndexKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
             HighPrice = decimal.ToDouble(kline.HighPrice),
             LowPrice = decimal.ToDouble(kline.LowPrice),
-            Interval = interval,
-            OpenTime = kline.OpenTime,
-            CloseTime = kline.CloseTime,
-            SymbolInfo = symbol,
-            SymbolInfoId = symbol.Name,
-            Id = CombineKlineId(symbol.Name, interval, kline.CloseTime)
+            OpenTime = ToUnixMilliseconds(kline.OpenTime),
+            CloseTime = ToUnixMilliseconds(kline.CloseTime)
         }).ToList());
     }
 
-    protected override async Task<Result<List<FuturesUsdtBinanceMarkPriceKline>>> GetMarkPriceKlinesAsync(BinanceFuturesUsdtSymbolInfo symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<PremiumIndexKline>>> GetMarkPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await usdFutures.GetMarkPriceKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new FuturesUsdtBinanceMarkPriceKline()
+        return Result.Ok(result.Value.AsParallel().Select(kline => new PremiumIndexKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
             HighPrice = decimal.ToDouble(kline.HighPrice),
             LowPrice = decimal.ToDouble(kline.LowPrice),
-            Interval = interval,
-            OpenTime = kline.OpenTime,
-            CloseTime = kline.CloseTime,
-            SymbolInfo = symbol,
-            SymbolInfoId = symbol.Name,
-            Id = CombineKlineId(symbol.Name, interval, kline.CloseTime)
+            OpenTime = ToUnixMilliseconds(kline.OpenTime),
+            CloseTime = ToUnixMilliseconds(kline.CloseTime)
         }).ToList());
     }
 
-    protected override async Task<Result<List<BinanceFuturesUsdtSymbolInfo>>> GetMarketAsync(CancellationToken ct = default)
+    protected override async Task<Result<List<SymbolInfoCsv>>> GetMarketAsync(CancellationToken ct = default)
     {
         Result<IEnumerable<BinanceFuturesUsdtSymbol>> result = await usdFutures.GetMarketAsync(ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        List<BinanceFuturesUsdtSymbolInfo> markets = result.Value.AsParallel().Select(symbol => new BinanceFuturesUsdtSymbolInfo
+        List<SymbolInfoCsv> markets = result.Value.AsParallel().Select(symbol => new SymbolInfoCsv
         {
             Name = symbol.Name,
             BaseAsset = symbol.BaseAsset,
             BaseAssetPrecision = symbol.BaseAssetPrecision,
             QuoteAsset = symbol.QuoteAsset,
-            ContractType = symbol.ContractType,
-            DeliveryDate = symbol.DeliveryDate,
+            ContractType = symbol.ContractType.ToString(),
+            DeliveryDate = ToUnixMilliseconds(symbol.DeliveryDate),
             LiquidationFee = decimal.ToDouble(symbol.LiquidationFee),
-            ListingDate = symbol.ListingDate,
+            ListingDate = ToUnixMilliseconds(symbol.ListingDate),
             MaintMarginPercent = decimal.ToDouble(symbol.MaintMarginPercent),
             MarginAsset = symbol.MarginAsset,
             MarketTakeBound = decimal.ToDouble(symbol.MarketTakeBound),
             RequiredMarginPercent = decimal.ToDouble(symbol.RequiredMarginPercent),
-            OrderTypes = symbol.OrderTypes,
+            OrderTypes = string.Join('|', symbol.OrderTypes),
             Pair = symbol.Pair,
             PricePrecision = symbol.PricePrecision,
             QuantityPrecision = symbol.QuantityPrecision,
             QuoteAssetPrecision = symbol.QuoteAssetPrecision,
-            Status = symbol.Status,
-            TimeInForce = symbol.TimeInForce,
+            Status = symbol.Status.ToString(),
+            TimeInForce = string.Join('|', symbol.TimeInForce),
             TriggerProtect = decimal.ToDouble(symbol.TriggerProtect),
-            UnderlyingType = symbol.UnderlyingType,
-            UnderlyingSubType = symbol.UnderlyingSubType,
-            SettlePlan = decimal.ToDouble(symbol.SettlePlan),
+            UnderlyingType = symbol.UnderlyingType.ToString(),
+            UnderlyingSubType = string.Join('|', symbol.UnderlyingSubType)
         }).ToList();
 
         return Result.Ok(markets);
@@ -387,204 +335,142 @@ internal class UsdFuturesStorageController : StorageController<BinanceFuturesUsd
         return Result.Ok(klines);
     }
 
-    public override async Task<DateTime> GetLastFundingTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        string symbolName = symbol.Name;
-        return (await db.FuturesUsdtFundingRates.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbolName, ct))
-            ? await db.FuturesUsdtFundingRates.AsNoTracking().Where(item => item.SymbolInfoId == symbolName).MaxAsync(item => item.FundingTime, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastFundingTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(FundingRatePath, symbol.Name, nameof(FundingRate.FundingTime), null, ct);
 
-    protected override async Task<Result<List<FuturesUsdtFundingRate>>> GetFundingRatesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<FundingRate>>> GetFundingRatesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesFundingRateHistory>> result = await usdFutures.GetFundingRatesAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.AsParallel().Select(rate => new FuturesUsdtFundingRate
+        return Result.Ok(result.Value.AsParallel().Select(rate => new FundingRate
         {
-            FundingRate = decimal.ToDouble(rate.FundingRate),
-            FundingTime = rate.FundingTime,
+            Rate = decimal.ToDouble(rate.FundingRate),
+            FundingTime = ToUnixMilliseconds(rate.FundingTime),
             MarkPrice = rate.MarkPrice.HasValue ? decimal.ToDouble(rate.MarkPrice.Value) : null,
-            SymbolInfoId = symbolName,
-            Id = CombineFundingRateId(symbolName, rate.FundingTime)
         }).ToList());
     }
 
-    public override async Task<DateTime> GetLastOpenInterestTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtOpenInterestHistories.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtOpenInterestHistories.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastOpenInterestTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(OpenInterestPath, symbol.Name, nameof(OpenInterestHistory.Timestamp), null, ct);
 
-    public override async Task<DateTime> GetLastBasisTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtBasisHistories.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtBasisHistories.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastBasisTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(BasisPath, symbol.Name, nameof(FuturesBasisCsv.Timestamp), null, ct);
 
-    protected override async Task<Result<List<FuturesUsdtOpenInterestHistory>>> GetOpenInterestHistoriesAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<OpenInterestHistory>>> GetOpenInterestHistoriesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesOpenInterestHistory>> result = await usdFutures.GetOpenInterestHistoryAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        List<FuturesUsdtOpenInterestHistory> openInterestHistories = result.Value
+        List<OpenInterestHistory> openInterestHistories = result.Value
             .Where(item => item.Timestamp.HasValue)
             .AsParallel()
-            .Select(item => new FuturesUsdtOpenInterestHistory
+            .Select(item => new OpenInterestHistory
             {
-                Timestamp = item.Timestamp!.Value,
+                Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
                 SumOpenInterest = decimal.ToDouble(item.SumOpenInterest),
-                SumOpenInterestValue = decimal.ToDouble(item.SumOpenInterestValue),
-                SymbolInfoId = symbolName,
-                Id = CombineOpenInterestId(symbolName, item.Timestamp.Value)
+                SumOpenInterestValue = decimal.ToDouble(item.SumOpenInterestValue)
             }).ToList();
         return Result.Ok(openInterestHistories);
     }
 
-    public override async Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtTopLongShortPositionRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtTopLongShortPositionRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(TopLongShortPositionRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), null, ct);
 
-    protected override async Task<Result<List<FuturesUsdtTopLongShortPositionRatio>>> GetTopLongShortPositionRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<LongShortRatioCsv>>> GetTopLongShortPositionRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesLongShortRatio>> result = await usdFutures.GetTopLongShortPositionRatioAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtTopLongShortPositionRatio
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new LongShortRatioCsv
         {
-            Timestamp = item.Timestamp!.Value,
+            Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             LongShortRatio = decimal.ToDouble(item.LongShortRatio),
             LongAccount = decimal.ToDouble(item.LongAccount),
-            ShortAccount = decimal.ToDouble(item.ShortAccount),
-            SymbolInfoId = symbolName,
-            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+            ShortAccount = decimal.ToDouble(item.ShortAccount)
         }).ToList());
     }
 
-    public override async Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtTopLongShortAccountRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtTopLongShortAccountRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(TopLongShortAccountRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), null, ct);
 
-    protected override async Task<Result<List<FuturesUsdtTopLongShortAccountRatio>>> GetTopLongShortAccountRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<LongShortRatioCsv>>> GetTopLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesLongShortRatio>> result = await usdFutures.GetTopLongShortAccountRatioAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtTopLongShortAccountRatio
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new LongShortRatioCsv
         {
-            Timestamp = item.Timestamp!.Value,
+            Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             LongShortRatio = decimal.ToDouble(item.LongShortRatio),
             LongAccount = decimal.ToDouble(item.LongAccount),
-            ShortAccount = decimal.ToDouble(item.ShortAccount),
-            SymbolInfoId = symbolName,
-            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+            ShortAccount = decimal.ToDouble(item.ShortAccount)
         }).ToList());
     }
 
-    public override async Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtGlobalLongShortAccountRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtGlobalLongShortAccountRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(GlobalLongShortAccountRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), null, ct);
 
-    public override async Task<DateTime> GetLastTakerLongShortRatioTimeAsync(BinanceFuturesUsdtSymbolInfo symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        return (await db.FuturesUsdtTakerLongShortRatios.AsNoTracking().AnyAsync(item => item.SymbolInfoId == symbol.Name, ct))
-            ? await db.FuturesUsdtTakerLongShortRatios.AsNoTracking().Where(item => item.SymbolInfoId == symbol.Name).MaxAsync(item => item.Timestamp, ct)
-            : yearsReserved;
-    }
+    public override Task<DateTime> GetLastTakerLongShortRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
+        => GetLastTimestampAsync(TakerLongShortRatioPath, symbol.Name, nameof(TakerLongShortRatioCsv.Timestamp), null, ct);
 
-    protected override async Task<Result<List<FuturesUsdtGlobalLongShortAccountRatio>>> GetGlobalLongShortAccountRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<LongShortRatioCsv>>> GetGlobalLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesLongShortRatio>> result = await usdFutures.GetGlobalLongShortAccountRatioAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtGlobalLongShortAccountRatio
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new LongShortRatioCsv
         {
-            Timestamp = item.Timestamp!.Value,
+            Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             LongShortRatio = decimal.ToDouble(item.LongShortRatio),
             LongAccount = decimal.ToDouble(item.LongAccount),
-            ShortAccount = decimal.ToDouble(item.ShortAccount),
-            SymbolInfoId = symbolName,
-            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+            ShortAccount = decimal.ToDouble(item.ShortAccount)
         }).ToList());
     }
 
-    protected override async Task<Result<List<FuturesUsdtBasis>>> GetBasisAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<FuturesBasisCsv>>> GetBasisAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesBasis>> result = await usdFutures.GetBasisAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.AsParallel().Select(item => new FuturesUsdtBasis
+        return Result.Ok(result.Value.AsParallel().Select(item => new FuturesBasisCsv
         {
-            Timestamp = item.Timestamp,
+            Timestamp = ToUnixMilliseconds(item.Timestamp),
             FuturesPrice = decimal.ToDouble(item.FuturesPrice),
             IndexPrice = decimal.ToDouble(item.IndexPrice),
             BasisValue = decimal.ToDouble(item.Basis),
             BasisRate = decimal.ToDouble(item.BasisRate),
-            AnnualizedBasisRate = item.AnnualizedBasisRate.HasValue ? decimal.ToDouble(item.AnnualizedBasisRate.Value) : null,
-            SymbolInfoId = symbolName,
-            Id = CombineOpenInterestId(symbolName, item.Timestamp)
+            AnnualizedBasisRate = item.AnnualizedBasisRate.HasValue ? decimal.ToDouble(item.AnnualizedBasisRate.Value) : null
         }).ToList());
     }
 
-    protected override async Task<Result<List<FuturesUsdtTakerLongShortRatio>>> GetTakerLongShortRatiosAsync(BinanceFuturesUsdtSymbolInfo symbol, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<List<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
         string symbolName = symbol.Name;
         Result<List<BinanceFuturesBuySellVolumeRatio>> result = await usdFutures.GetTakerLongShortRatioAsync(symbolName, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new FuturesUsdtTakerLongShortRatio
+        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new TakerLongShortRatioCsv
         {
-            Timestamp = item.Timestamp!.Value,
+            Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             BuySellRatio = decimal.ToDouble(item.BuySellRatio),
             BuyVolume = decimal.ToDouble(item.BuyVolume),
             SellVolume = decimal.ToDouble(item.SellVolume),
-            SymbolInfoId = symbolName,
-            Id = CombineLongShortRatioId(symbolName, item.Timestamp.Value)
+            BuyVolumeValue = null,
+            SellVolumeValue = null
         }).ToList());
     }
 

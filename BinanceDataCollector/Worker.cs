@@ -1,8 +1,6 @@
 using BinanceDataCollector.Collectors.CollectorControllers;
-using CollectorModels;
 using Hangfire;
 using Hangfire.InMemory;
-using Microsoft.EntityFrameworkCore;
 
 namespace BinanceDataCollector;
 
@@ -13,13 +11,6 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider scopeServiceProvider = scope.ServiceProvider;
-        using BinanceDbContext db = scopeServiceProvider.GetRequiredService<BinanceDbContext>();
-        _ = db.Model;
-        if (db.Database.GetPendingMigrations().Any())
-            db.Database.Migrate();
-        _ = db.Model;
         productionLine.Start();
         GlobalConfiguration.Configuration
                 .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
@@ -87,9 +78,9 @@ public class HangfireJob
             logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
             productionLine.ResetEvent();
 
-            Task parquetArchiveTask = ExportParquetArchiveAsync(controllers, ct);
+            Task duckDbArchiveTask = PackageDuckDbArchiveAsync(ct);
             Task marketDataArchiveTask = PackageMarketDataArchiveAsync(ct);
-            await Task.WhenAll(parquetArchiveTask, marketDataArchiveTask);
+            await Task.WhenAll(duckDbArchiveTask, marketDataArchiveTask);
         }
         finally
         {
@@ -98,25 +89,12 @@ public class HangfireJob
         }
     }
 
-    private async Task ExportParquetArchiveAsync(ICollectorController[] controllers, CancellationToken ct)
+    private async Task PackageDuckDbArchiveAsync(CancellationToken ct)
     {
-        ParquetExportArchiveHelper.PrepareWorkRoot();
-        try
-        {
-            foreach (ICollectorController controller in controllers)
-            {
-                logger.LogInformation("Start exporting parquet. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
-                await controller.ExportToParquetAsync(ct);
-                logger.LogInformation("Finish exporting parquet. Controller: {Controller}, Time: {time}", controller.GetType().Name, DateTimeOffset.Now);
-            }
-
-            await ParquetExportArchiveHelper.FinalizeArchiveAsync(ct);
-            logger.LogInformation("Finish packaging parquet archive at: {time}", DateTimeOffset.Now);
-        }
-        finally
-        {
-            ParquetExportArchiveHelper.CleanupWorkRoot();
-        }
+        logger.LogInformation("Start packaging DuckDB archive at: {time}", DateTimeOffset.Now);
+        bool packaged = await DuckDbStorageArchiveHelper.FinalizeArchiveAsync(logger, ct);
+        if (packaged)
+            logger.LogInformation("Finish packaging DuckDB archive at: {time}", DateTimeOffset.Now);
     }
 
     private async Task PackageMarketDataArchiveAsync(CancellationToken ct)

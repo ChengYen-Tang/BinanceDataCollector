@@ -1,11 +1,6 @@
 using BinanceDataCollector;
 using BinanceDataCollector.Collectors.CollectorControllers;
 using BinanceDataCollector.StorageControllers;
-using CollectorModels;
-using CollectorModels.ShardingCore;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Migrations;
-using ShardingCore;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureLogging(logging =>
@@ -42,54 +37,6 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddScoped<UsdFuturesStorageController>();
 
         services.AddHostedService<Worker>();
-
-        services.AddShardingDbContext<BinanceDbContext>()
-                .UseRouteConfig(op =>
-                {
-                    op.AddShardingTableRoute<SpotBinanceKlineVirtualTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtBinanceKlineVirtualTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtBinancePremiumIndexKlineTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtBinanceIndexPriceKlineTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtBinanceMarkPriceKlineTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtFundingRateTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtOpenInterestHistoryTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtBasisTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtTopLongShortPositionRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtTopLongShortAccountRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtGlobalLongShortAccountRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesUsdtTakerLongShortRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinFundingRateTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinOpenInterestHistoryTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinBasisTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinTopLongShortPositionRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinTopLongShortAccountRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinGlobalLongShortAccountRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinTakerLongShortRatioTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinBinanceKlineVirtualTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinBinancePremiumIndexKlineTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinBinanceIndexPriceKlineTableRoute>();
-                    op.AddShardingTableRoute<FuturesCoinBinanceMarkPriceKlineTableRoute>();
-                }).UseConfig(op =>
-                {
-                    op.ThrowIfQueryRouteNotMatch = false;
-                    op.UseShardingQuery((connStr, builder) =>
-                    {
-                        //connStr is delegate input param
-                        builder.UseSqlServer(connStr, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); });
-                    });
-                    op.UseShardingTransaction((connection, builder) =>
-                    {
-                        //connection is delegate input param
-                        builder.UseSqlServer(connection, opts => { opts.CommandTimeout((int)TimeSpan.FromMinutes(180).TotalSeconds); });
-                    });
-                    //use your data base connection string
-                    op.AddDefaultDataSource("DefaultConnection",
-                        hostContext.Configuration["ConnectionStrings:DefaultConnection"]);
-                    op.UseShardingMigrationConfigure(b =>
-                    {
-                        b.ReplaceService<IMigrationsSqlGenerator, ShardingSqlServerMigrationsSqlGenerator>();
-                    });
-                }).AddShardingCore();
     })
     .Build();
 
