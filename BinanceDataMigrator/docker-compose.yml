@@ -1,0 +1,31 @@
+version: "3"
+services:
+  binance-data-migrator:
+    image: kenneth850511/binance-data-migrator:latest
+    container_name: BinanceDataMigrator
+    volumes:
+      - ./appsettings.json:/app/appsettings.json
+      - ./DataStorage:/app/DataStorage
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - mssql
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:latest
+    user: root
+    container_name: SQL-Server
+    restart: always
+    environment:
+      ACCEPT_EULA: Y
+      MSSQL_SA_PASSWORD: P@ssw0rd
+      TZ: Asia/Taipei
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./mssql/data:/var/opt/mssql/data
+      - ./mssql/log:/var/opt/mssql/log
+      - ./mssql/secrets:/var/opt/mssql/secrets
+    deploy:
+      resources:
+        limits:
+          memory: 16G
