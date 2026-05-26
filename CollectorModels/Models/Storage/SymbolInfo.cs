@@ -1,4 +1,4 @@
-namespace CollectorModels.Models.Csv;
+namespace CollectorModels.Models.Storage;
 
 public class SymbolInfoCsv
 {

@@ -1,10 +1,6 @@
 ﻿using BinanceDataCollector.Collectors.BinanceMarketData;
 using BinanceDataCollector.WorkItems;
-using CollectorModels;
-using CollectorModels.Models;
-using CollectorModels.Models.Csv;
-using CollectorModels.ShardingCore;
-using Parquet;
+using CollectorModels.Models.Storage;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -19,9 +15,10 @@ internal abstract class StorageController<T>
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
+    private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
     protected static string DataPath = DuckDbStorageArchiveHelper.StorageRootPath;
     protected static string MarketDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "BinanceMarketData");
-    protected static string MarketDataTempPath = Path.Combine(DuckDbStorageArchiveHelper.TmpPath, "BinanceMarketData");
+    protected static string MarketDataTempPath = Path.Combine(BasePath, "Tmp", "BinanceMarketData");
     protected static string RootKlinePath = Path.Combine(DataPath, "Kline");
     protected static string RootPremiumIndexKlinePath = Path.Combine(DataPath, "PremiumIndexKline");
     protected static string RootIndexPriceKlinePath = Path.Combine(DataPath, "IndexPriceKline");
@@ -305,31 +302,6 @@ internal abstract class StorageController<T>
         => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
             dataType, symbol, interval, startTime, message);
 
-    protected void LogParquetExportFailure(string dataType, string symbol, string message)
-        => logger.LogError("Parquet export failed. DataType: {DataType}, Symbol: {Symbol}, Message: {Message}",
-            dataType, symbol, message);
-
-    protected virtual ParquetExportOptions GetMetadataParquetExportOptions()
-        => new()
-        {
-            CompressionMethod = CompressionMethod.Snappy,
-            RowGroupSize = 1_024,
-        };
-
-    protected virtual ParquetExportOptions GetLargeTimeSeriesParquetExportOptions()
-        => new()
-        {
-            CompressionMethod = CompressionMethod.Zstd,
-            RowGroupSize = 100_000,
-        };
-
-    protected virtual ParquetExportOptions GetMediumTimeSeriesParquetExportOptions()
-        => new()
-        {
-            CompressionMethod = CompressionMethod.Zstd,
-            RowGroupSize = 20_000,
-        };
-
     protected TEntity[] DeduplicateByKey<TEntity, TKey>(IList<TEntity> entities, Func<TEntity, TKey> getKey)
         where TKey : notnull
     {
@@ -345,252 +317,6 @@ internal abstract class StorageController<T>
                 typeof(TEntity).Name, entities.Count, uniqueEntities.Count);
 
         return [.. uniqueEntities.Values];
-    }
-
-    public async Task ExportToParquetAsync(CancellationToken ct = default)
-    {
-        logger.LogInformation("Start parquet export. StorageController: {StorageController}", GetType().Name);
-        Result<string[]> symbolNamesResult = await GetAllSymbolNamesAsync(ct);
-        if (symbolNamesResult.IsFailed)
-        {
-            logger.LogError(symbolNamesResult.Errors[0].Message);
-            return;
-        }
-
-        logger.LogInformation("Parquet export symbols loaded. StorageController: {StorageController}, SymbolCount: {SymbolCount}", GetType().Name, symbolNamesResult.Value.Length);
-
-        if (Directory.Exists(SymbolInfoPath))
-            Directory.Delete(SymbolInfoPath, true);
-        Directory.CreateDirectory(SymbolInfoPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, "SymbolInfo");
-
-        Result<SymbolInfoCsv[]> symbolInfosResult = await GetCsvSymbolInfosAsync(ct);
-        if (symbolInfosResult.IsFailed)
-            logger.LogError(symbolInfosResult.Errors[0].Message);
-        else
-        {
-            string symbolInfoPath = Path.Combine(SymbolInfoPath, "symbols.parquet");
-            await ParquetExportHelper.ExportAsync(symbolInfoPath, symbolInfosResult.Value, GetMetadataParquetExportOptions(), ct);
-        }
-
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, "SymbolInfo");
-
-        if (Directory.Exists(KlinePath))
-            Directory.Delete(KlinePath, true);
-        Directory.CreateDirectory(KlinePath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(Kline));
-
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<Kline[]> klinesResult = await GetCsvKlinesAsync(symbol, ct);
-            if (klinesResult.IsFailed)
-            {
-                LogParquetExportFailure(nameof(Kline), symbol, klinesResult.Errors[0].Message);
-                return;
-            }
-
-            string path = Path.Combine(KlinePath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(path, klinesResult.Value, GetLargeTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(Kline));
-
-        if (!IsFutures)
-        {
-            logger.LogInformation("Finish parquet export. StorageController: {StorageController}", GetType().Name);
-            return;
-        }
-
-        if (Directory.Exists(PremiumIndexKlinePath))
-            Directory.Delete(PremiumIndexKlinePath, true);
-        Directory.CreateDirectory(PremiumIndexKlinePath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(PremiumIndexKline));
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<PremiumIndexKline[]> premiumIndexKlinesResult = await GetCsvPremiumIndexKlinesAsync(symbol, ct);
-            if (premiumIndexKlinesResult.IsFailed)
-            {
-                LogParquetExportFailure(nameof(PremiumIndexKline), symbol, premiumIndexKlinesResult.Errors[0].Message);
-                return;
-            }
-
-            string premiumIndexPath = Path.Combine(PremiumIndexKlinePath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(premiumIndexPath, premiumIndexKlinesResult.Value, GetLargeTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(PremiumIndexKline));
-
-        if (Directory.Exists(IndexPriceKlinePath))
-            Directory.Delete(IndexPriceKlinePath, true);
-        Directory.CreateDirectory(IndexPriceKlinePath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: IndexPriceKline", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<PremiumIndexKline[]> indexPriceKlinesResult = await GetCsvIndexPriceKlinesAsync(symbol, ct);
-            if (indexPriceKlinesResult.IsFailed)
-            {
-                LogParquetExportFailure("IndexPriceKline", symbol, indexPriceKlinesResult.Errors[0].Message);
-                return;
-            }
-
-            string indexPricePath = Path.Combine(IndexPriceKlinePath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(indexPricePath, indexPriceKlinesResult.Value, GetLargeTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: IndexPriceKline", GetType().Name);
-
-        if (Directory.Exists(MarkPriceKlinePath))
-            Directory.Delete(MarkPriceKlinePath, true);
-        Directory.CreateDirectory(MarkPriceKlinePath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: MarkPriceKline", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<PremiumIndexKline[]> markPriceKlinesResult = await GetCsvMarkPriceKlinesAsync(symbol, ct);
-            if (markPriceKlinesResult.IsFailed)
-            {
-                LogParquetExportFailure("MarkPriceKline", symbol, markPriceKlinesResult.Errors[0].Message);
-                return;
-            }
-
-            string markPricePath = Path.Combine(MarkPriceKlinePath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(markPricePath, markPriceKlinesResult.Value, GetLargeTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: MarkPriceKline", GetType().Name);
-
-        if (Directory.Exists(FundingRatePath))
-            Directory.Delete(FundingRatePath, true);
-        Directory.CreateDirectory(FundingRatePath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(FundingRate));
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<FundingRate[]> fundingRateResult = await GetCsvFundingRatesAsync(symbol, ct);
-            if (fundingRateResult.IsFailed)
-            {
-                LogParquetExportFailure(nameof(FundingRate), symbol, fundingRateResult.Errors[0].Message);
-                return;
-            }
-
-            string fundingRatePath = Path.Combine(FundingRatePath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(fundingRatePath, fundingRateResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(FundingRate));
-
-        if (Directory.Exists(OpenInterestPath))
-            Directory.Delete(OpenInterestPath, true);
-        Directory.CreateDirectory(OpenInterestPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(OpenInterestHistory));
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<OpenInterestHistory[]> openInterestResult = await GetCsvOpenInterestHistoriesAsync(symbol, ct);
-            if (openInterestResult.IsFailed)
-            {
-                LogParquetExportFailure(nameof(OpenInterestHistory), symbol, openInterestResult.Errors[0].Message);
-                return;
-            }
-
-            string openInterestPath = Path.Combine(OpenInterestPath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(openInterestPath, openInterestResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: {DataType}", GetType().Name, nameof(OpenInterestHistory));
-
-        if (Directory.Exists(BasisPath))
-            Directory.Delete(BasisPath, true);
-        Directory.CreateDirectory(BasisPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: Basis", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<FuturesBasisCsv[]> basisResult = await GetCsvBasisAsync(symbol, ct);
-            if (basisResult.IsFailed)
-            {
-                LogParquetExportFailure("Basis", symbol, basisResult.Errors[0].Message);
-                return;
-            }
-
-            string basisPath = Path.Combine(BasisPath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(basisPath, basisResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: Basis", GetType().Name);
-
-        if (Directory.Exists(TopLongShortPositionRatioPath))
-            Directory.Delete(TopLongShortPositionRatioPath, true);
-        Directory.CreateDirectory(TopLongShortPositionRatioPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: TopLongShortPositionRatio", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<LongShortRatioCsv[]> ratioResult = await GetCsvTopLongShortPositionRatiosAsync(symbol, ct);
-            if (ratioResult.IsFailed)
-            {
-                LogParquetExportFailure("TopLongShortPositionRatio", symbol, ratioResult.Errors[0].Message);
-                return;
-            }
-
-            string ratioPath = Path.Combine(TopLongShortPositionRatioPath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(ratioPath, ratioResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: TopLongShortPositionRatio", GetType().Name);
-
-        if (Directory.Exists(TopLongShortAccountRatioPath))
-            Directory.Delete(TopLongShortAccountRatioPath, true);
-        Directory.CreateDirectory(TopLongShortAccountRatioPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: TopLongShortAccountRatio", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<LongShortRatioCsv[]> ratioResult = await GetCsvTopLongShortAccountRatiosAsync(symbol, ct);
-            if (ratioResult.IsFailed)
-            {
-                LogParquetExportFailure("TopLongShortAccountRatio", symbol, ratioResult.Errors[0].Message);
-                return;
-            }
-
-            string ratioPath = Path.Combine(TopLongShortAccountRatioPath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(ratioPath, ratioResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: TopLongShortAccountRatio", GetType().Name);
-
-        if (Directory.Exists(GlobalLongShortAccountRatioPath))
-            Directory.Delete(GlobalLongShortAccountRatioPath, true);
-        Directory.CreateDirectory(GlobalLongShortAccountRatioPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: GlobalLongShortAccountRatio", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<LongShortRatioCsv[]> ratioResult = await GetCsvGlobalLongShortAccountRatiosAsync(symbol, ct);
-            if (ratioResult.IsFailed)
-            {
-                LogParquetExportFailure("GlobalLongShortAccountRatio", symbol, ratioResult.Errors[0].Message);
-                return;
-            }
-
-            string ratioPath = Path.Combine(GlobalLongShortAccountRatioPath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(ratioPath, ratioResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: GlobalLongShortAccountRatio", GetType().Name);
-
-        if (Directory.Exists(TakerLongShortRatioPath))
-            Directory.Delete(TakerLongShortRatioPath, true);
-        Directory.CreateDirectory(TakerLongShortRatioPath);
-        logger.LogInformation("Start parquet export section. StorageController: {StorageController}, DataType: TakerLongShortRatio", GetType().Name);
-
-        await Parallel.ForEachAsync(symbolNamesResult.Value, ct, async (symbol, ct) =>
-        {
-            Result<TakerLongShortRatioCsv[]> ratioResult = await GetCsvTakerLongShortRatiosAsync(symbol, ct);
-            if (ratioResult.IsFailed)
-            {
-                LogParquetExportFailure("TakerLongShortRatio", symbol, ratioResult.Errors[0].Message);
-                return;
-            }
-
-            string ratioPath = Path.Combine(TakerLongShortRatioPath, $"{symbol}.parquet");
-            await ParquetExportHelper.ExportAsync(ratioPath, ratioResult.Value, GetMediumTimeSeriesParquetExportOptions(), ct);
-        });
-        logger.LogInformation("Finish parquet export section. StorageController: {StorageController}, DataType: TakerLongShortRatio", GetType().Name);
-        logger.LogInformation("Finish parquet export. StorageController: {StorageController}", GetType().Name);
     }
 
     protected async Task InsertKlinesAsync(SymbolRows<Kline> batch, CancellationToken ct = default)
@@ -889,32 +615,6 @@ internal abstract class StorageController<T>
     protected abstract Task<Result<List<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<FuturesBasisCsv>>> GetBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
-    protected abstract Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default);
-    protected abstract Task<Result<SymbolInfoCsv[]>> GetCsvSymbolInfosAsync(CancellationToken ct = default);
-
-    protected abstract Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default);
-
-    protected abstract Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<OpenInterestHistory[]>> GetCsvOpenInterestHistoriesAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<TakerLongShortRatioCsv[]>> GetCsvTakerLongShortRatiosAsync(string symbol, CancellationToken ct = default);
-    protected abstract Task<Result<FuturesBasisCsv[]>> GetCsvBasisAsync(string symbol, CancellationToken ct = default);
-
-    protected void LogDropStatus(ShardingExtension.ShardingTableDropResult result)
-    {
-        if (result.ExistedBeforeDrop && result.ExistsAfterDrop)
-            logger.LogError("Table cleanup status. Table: {Table}, Missing: 0, Dropped: 0, Failed: 1", result.EscapedTableName);
-        else if (result.DroppedSuccessfully)
-            logger.LogInformation("Table cleanup status. Table: {Table}, Missing: 0, Dropped: 1, Failed: 0", result.EscapedTableName);
-        else
-            logger.LogInformation("Table cleanup status. Table: {Table}, Missing: 1, Dropped: 0, Failed: 0", result.EscapedTableName);
-    }
-
     protected Task DeleteMarketDataSymbolDirectoriesAsync(IReadOnlyCollection<string> delistedSymbols, IReadOnlyCollection<string> marketDataTypes, CancellationToken ct = default)
     {
         if (delistedSymbols.Count == 0 || marketDataTypes.Count == 0)
@@ -1110,15 +810,4 @@ internal abstract class StorageController<T>
         }
     }
 
-    protected static string CombineKlineId(string symbol, KlineInterval interval, DateTime closeTime)
-        => $"{symbol}-{interval}-{closeTime:s}";
-
-    protected static string CombineFundingRateId(string symbol, DateTime fundingTime)
-        => $"{symbol}-{fundingTime:s}";
-
-    protected static string CombineOpenInterestId(string symbol, DateTime timestamp)
-        => $"{symbol}-{timestamp:s}";
-
-    protected static string CombineLongShortRatioId(string symbol, DateTime timestamp)
-        => $"{symbol}-{timestamp:s}";
 }

@@ -1,18 +1,10 @@
 ﻿using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Spot;
 using BinanceDataCollector.Collectors.BinanceApi;
+using CollectorModels.Models.Storage;
 using MarketDataBase = BinanceDataCollector.Collectors.BinanceMarketData.BaseMarketData;
 using MarketDataDownloadBatch = BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch;
 using SpotMarketData = BinanceDataCollector.Collectors.BinanceMarketData.Spot;
-using CollectorModels;
-using CollectorModels.Models;
-using CollectorModels.Models.Csv;
-using CollectorModels.ShardingCore;
-using CryptoExchange.Net.Converters.SystemTextJson;
-using EFCore.BulkExtensions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
-
 namespace BinanceDataCollector.StorageControllers;
 
 internal class SpotStorageController : StorageController<SymbolInfoCsv>
@@ -95,74 +87,6 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
 
     public override Task<DateTime> GetLastBasisTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support basis.");
-
-    protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        string[] symbols = await db.BinanceSymbolInfos.AsNoTracking().Select(item => item.Name).ToArrayAsync(ct);
-        if (symbols.Length == 0)
-            return Result.Fail("No symbols found.");
-        return Result.Ok(symbols);
-    }
-
-    protected override async Task<Result<SymbolInfoCsv[]>> GetCsvSymbolInfosAsync(CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        SymbolInfoCsv[] symbols = await db.BinanceSymbolInfos.AsNoTracking()
-            .OrderBy(item => item.Name)
-            .Select(item => new SymbolInfoCsv
-            {
-                Name = item.Name,
-                Status = item.Status.ToString(),
-                BaseAsset = item.BaseAsset,
-                QuoteAsset = item.QuoteAsset,
-                BaseAssetPrecision = item.BaseAssetPrecision,
-                QuoteAssetPrecision = item.QuoteAssetPrecision,
-                BaseFeePrecision = item.BaseFeePrecision,
-                QuoteFeePrecision = item.QuoteFeePrecision,
-                OrderTypes = string.Join('|', item.OrderTypes),
-                Permissions = string.Join('|', item.Permissions),
-                IcebergAllowed = item.IcebergAllowed,
-                CancelReplaceAllowed = item.CancelReplaceAllowed,
-                IsSpotTradingAllowed = item.IsSpotTradingAllowed,
-                AllowTrailingStop = item.AllowTrailingStop,
-                IsMarginTradingAllowed = item.IsMarginTradingAllowed,
-                OCOAllowed = item.OCOAllowed,
-                QuoteOrderQuantityMarketAllowed = item.QuoteOrderQuantityMarketAllowed
-            })
-            .ToArrayAsync(ct);
-        if (symbols.Length == 0)
-            return Result.Fail("No symbol infos found.");
-        return Result.Ok(symbols);
-    }
-
-    protected override async Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        Kline[] klines = await db.SpotBinanceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new Kline
-        {
-            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
-            OpenPrice = item.OpenPrice,
-            HighPrice = item.HighPrice,
-            LowPrice = item.LowPrice,
-            ClosePrice = item.ClosePrice,
-            Volume = item.Volume,
-            QuoteVolume = item.QuoteVolume,
-            TakerBuyBaseVolume = item.TakerBuyBaseVolume,
-            TakerBuyQuoteVolume = item.TakerBuyQuoteVolume,
-            TradeCount = item.TradeCount,
-            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
-        }).ToArrayAsync(ct);
-        if (klines.Length == 0)
-            return Result.Fail("No klines found.");
-        return Result.Ok(klines);
-    }
 
     protected override async Task<Result<List<Kline>>> GetKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
@@ -247,33 +171,4 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
         return Result.Ok(markets);
     }
 
-    protected override Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default)
-        => throw new NotImplementedException();
-
-    protected override Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support index price klines.");
-
-    protected override Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support mark price klines.");
-
-    protected override Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support funding rates.");
-
-    protected override Task<Result<OpenInterestHistory[]>> GetCsvOpenInterestHistoriesAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support open interest histories.");
-
-    protected override Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support long/short ratios.");
-
-    protected override Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support long/short ratios.");
-
-    protected override Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support long/short ratios.");
-
-    protected override Task<Result<TakerLongShortRatioCsv[]>> GetCsvTakerLongShortRatiosAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
-
-    protected override Task<Result<FuturesBasisCsv[]>> GetCsvBasisAsync(string symbol, CancellationToken ct = default)
-        => throw new NotSupportedException("Spot market does not support basis.");
 }

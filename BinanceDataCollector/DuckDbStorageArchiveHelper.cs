@@ -11,7 +11,6 @@ internal static class DuckDbStorageArchiveHelper
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
 
     public static string StorageRootPath { get; } = Path.Combine(BasePath, "DataStorage");
-    public static string TmpPath { get; } = Path.Combine(BasePath, "Tmp");
     public static string DataPath { get; } = Path.Combine(BasePath, "Data");
     public static string ArchivePath { get; } = Path.Combine(DataPath, ArchiveFileName);
     public static string HashPath { get; } = Path.Combine(DataPath, HashFileName);
@@ -28,7 +27,7 @@ internal static class DuckDbStorageArchiveHelper
         DeleteFileIfExists(ArchivePath);
         DeleteFileIfExists(HashPath);
 
-        ZipFile.CreateFromDirectory(StorageRootPath, ArchivePath, CompressionLevel.NoCompression, includeBaseDirectory: false);
+        ZipFile.CreateFromDirectory(StorageRootPath, ArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
 
         string hashText = await ComputeSha256Async(ArchivePath, ct);
         await File.WriteAllTextAsync(HashPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);

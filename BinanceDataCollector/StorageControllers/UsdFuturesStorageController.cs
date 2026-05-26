@@ -1,18 +1,10 @@
 ﻿using Binance.Net.Interfaces.Clients;
-using Binance.Net.Enums;
 using Binance.Net.Objects.Models.Futures;
 using BinanceDataCollector.Collectors.BinanceApi;
+using CollectorModels.Models.Storage;
 using MarketDataBase = BinanceDataCollector.Collectors.BinanceMarketData.BaseMarketData;
 using MarketDataDownloadBatch = BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch;
 using MarketDataUsdFutures = BinanceDataCollector.Collectors.BinanceMarketData.UsdFutures;
-using CollectorModels;
-using CollectorModels.Models;
-using CollectorModels.Models.Csv;
-using CollectorModels.ShardingCore;
-using CryptoExchange.Net.Converters.SystemTextJson;
-using EFCore.BulkExtensions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -98,117 +90,6 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
 
     public override Task<DateTime> GetLastMarkPriceTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
         => GetLastTimestampAsync(MarkPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
-
-    protected override async Task<Result<string[]>> GetAllSymbolNamesAsync(CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        string[] symbols = await db.BinanceFuturesUsdtSymbolInfos.AsNoTracking().Select(item => item.Name).ToArrayAsync(ct);
-        if (symbols.Length == 0)
-            return Result.Fail("No symbols found.");
-        return Result.Ok(symbols);
-    }
-
-    protected override async Task<Result<SymbolInfoCsv[]>> GetCsvSymbolInfosAsync(CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        SymbolInfoCsv[] symbols = await db.BinanceFuturesUsdtSymbolInfos.AsNoTracking()
-            .OrderBy(item => item.Name)
-            .Select(item => new SymbolInfoCsv
-            {
-                Name = item.Name,
-                Status = item.Status.ToString(),
-                BaseAsset = item.BaseAsset,
-                QuoteAsset = item.QuoteAsset,
-                MarginAsset = item.MarginAsset,
-                Pair = item.Pair,
-                BaseAssetPrecision = item.BaseAssetPrecision,
-                QuoteAssetPrecision = item.QuoteAssetPrecision,
-                PricePrecision = item.PricePrecision,
-                QuantityPrecision = item.QuantityPrecision,
-                ContractType = item.ContractType.ToString(),
-                UnderlyingType = item.UnderlyingType.ToString(),
-                UnderlyingSubType = string.Join('|', item.UnderlyingSubType),
-                OrderTypes = string.Join('|', item.OrderTypes),
-                TimeInForce = string.Join('|', item.TimeInForce),
-                MaintMarginPercent = item.MaintMarginPercent,
-                RequiredMarginPercent = item.RequiredMarginPercent,
-                TriggerProtect = item.TriggerProtect,
-                LiquidationFee = item.LiquidationFee,
-                MarketTakeBound = item.MarketTakeBound,
-                ListingDate = DateTimeConverter.ConvertToMilliseconds(item.ListingDate).Value,
-                DeliveryDate = DateTimeConverter.ConvertToMilliseconds(item.DeliveryDate).Value
-            })
-            .ToArrayAsync(ct);
-        if (symbols.Length == 0)
-            return Result.Fail("No symbol infos found.");
-        return Result.Ok(symbols);
-    }
-
-    protected override async Task<Result<Kline[]>> GetCsvKlinesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        Kline[] klines = await db.FuturesUsdtBinanceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new Kline
-        {
-            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
-            OpenPrice = item.OpenPrice,
-            HighPrice = item.HighPrice,
-            LowPrice = item.LowPrice,
-            ClosePrice = item.ClosePrice,
-            Volume = item.Volume,
-            QuoteVolume = item.QuoteVolume,
-            TakerBuyBaseVolume = item.TakerBuyBaseVolume,
-            TakerBuyQuoteVolume = item.TakerBuyQuoteVolume,
-            TradeCount = item.TradeCount,
-            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
-        }).ToArrayAsync(ct);
-        if (klines.Length == 0)
-            return Result.Fail("No klines found.");
-        return Result.Ok(klines);
-    }
-
-    protected override async Task<Result<PremiumIndexKline[]>> GetCsvIndexPriceKlinesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        PremiumIndexKline[] klines = await db.FuturesUsdtBinanceIndexPriceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new PremiumIndexKline
-        {
-            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
-            OpenPrice = item.OpenPrice,
-            HighPrice = item.HighPrice,
-            LowPrice = item.LowPrice,
-            ClosePrice = item.ClosePrice,
-            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
-        }).ToArrayAsync(ct);
-        if (klines.Length == 0)
-            return Result.Fail("No klines found.");
-        return Result.Ok(klines);
-    }
-
-    protected override async Task<Result<PremiumIndexKline[]>> GetCsvMarkPriceKlinesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        PremiumIndexKline[] klines = await db.FuturesUsdtBinanceMarkPriceKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new PremiumIndexKline
-        {
-            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
-            OpenPrice = item.OpenPrice,
-            HighPrice = item.HighPrice,
-            LowPrice = item.LowPrice,
-            ClosePrice = item.ClosePrice,
-            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
-        }).ToArrayAsync(ct);
-        if (klines.Length == 0)
-            return Result.Fail("No klines found.");
-        return Result.Ok(klines);
-    }
 
     protected override async Task<Result<List<Kline>>> GetKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
@@ -314,25 +195,6 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
         }).ToList();
 
         return Result.Ok(markets);
-    }
-
-    protected override async Task<Result<PremiumIndexKline[]>> GetCsvPremiumIndexKlinesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        PremiumIndexKline[] klines = await db.FuturesUsdtBinancePremiumIndexKlines.AsNoTracking().Where(item => item.SymbolInfoId == symbol).OrderBy(item => item.OpenTime).Select(item => new PremiumIndexKline
-        {
-            OpenTime = DateTimeConverter.ConvertToMilliseconds(item.OpenTime).Value,
-            OpenPrice = item.OpenPrice,
-            HighPrice = item.HighPrice,
-            LowPrice = item.LowPrice,
-            ClosePrice = item.ClosePrice,
-            CloseTime = DateTimeConverter.ConvertToMilliseconds(item.CloseTime).Value
-        }).ToArrayAsync(ct);
-        if (klines.Length == 0)
-            return Result.Fail("No klines found.");
-        return Result.Ok(klines);
     }
 
     public override Task<DateTime> GetLastFundingTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
@@ -472,149 +334,6 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
             BuyVolumeValue = null,
             SellVolumeValue = null
         }).ToList());
-    }
-
-    protected override async Task<Result<FundingRate[]>> GetCsvFundingRatesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        FundingRate[] rates = await db.FuturesUsdtFundingRates.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.FundingTime)
-            .Select(item => new FundingRate
-            {
-                FundingTime = DateTimeConverter.ConvertToMilliseconds(item.FundingTime).Value,
-                Rate = item.FundingRate,
-                MarkPrice = item.MarkPrice
-            }).ToArrayAsync(ct);
-        if (rates.Length == 0)
-            return Result.Fail("No funding rates found.");
-        return Result.Ok(rates);
-    }
-
-    protected override async Task<Result<OpenInterestHistory[]>> GetCsvOpenInterestHistoriesAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        OpenInterestHistory[] openInterestHistories = await db.FuturesUsdtOpenInterestHistories.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.Timestamp)
-            .Select(item => new OpenInterestHistory
-            {
-                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
-                SumOpenInterest = item.SumOpenInterest,
-                SumOpenInterestValue = item.SumOpenInterestValue
-            }).ToArrayAsync(ct);
-
-        if (openInterestHistories.Length == 0)
-            return Result.Fail("No open interest histories found.");
-        return Result.Ok(openInterestHistories);
-    }
-
-    protected override async Task<Result<FuturesBasisCsv[]>> GetCsvBasisAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        FuturesBasisCsv[] histories = await db.FuturesUsdtBasisHistories.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.Timestamp)
-            .Select(item => new FuturesBasisCsv
-            {
-                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
-                FuturesPrice = item.FuturesPrice,
-                IndexPrice = item.IndexPrice,
-                BasisValue = item.BasisValue,
-                BasisRate = item.BasisRate,
-                AnnualizedBasisRate = item.AnnualizedBasisRate
-            }).ToArrayAsync(ct);
-        if (histories.Length == 0)
-            return Result.Fail("No basis histories found.");
-        return Result.Ok(histories);
-    }
-
-    protected override async Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortPositionRatiosAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        LongShortRatioCsv[] ratios = await db.FuturesUsdtTopLongShortPositionRatios.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.Timestamp)
-            .Select(item => new LongShortRatioCsv
-            {
-                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
-                LongShortRatio = item.LongShortRatio,
-                LongAccount = item.LongAccount,
-                ShortAccount = item.ShortAccount
-            }).ToArrayAsync(ct);
-        if (ratios.Length == 0)
-            return Result.Fail("No top long short position ratios found.");
-        return Result.Ok(ratios);
-    }
-
-    protected override async Task<Result<LongShortRatioCsv[]>> GetCsvTopLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        LongShortRatioCsv[] ratios = await db.FuturesUsdtTopLongShortAccountRatios.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.Timestamp)
-            .Select(item => new LongShortRatioCsv
-            {
-                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
-                LongShortRatio = item.LongShortRatio,
-                LongAccount = item.LongAccount,
-                ShortAccount = item.ShortAccount
-            }).ToArrayAsync(ct);
-        if (ratios.Length == 0)
-            return Result.Fail("No top long short account ratios found.");
-        return Result.Ok(ratios);
-    }
-
-    protected override async Task<Result<LongShortRatioCsv[]>> GetCsvGlobalLongShortAccountRatiosAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        LongShortRatioCsv[] ratios = await db.FuturesUsdtGlobalLongShortAccountRatios.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.Timestamp)
-            .Select(item => new LongShortRatioCsv
-            {
-                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
-                LongShortRatio = item.LongShortRatio,
-                LongAccount = item.LongAccount,
-                ShortAccount = item.ShortAccount
-            }).ToArrayAsync(ct);
-        if (ratios.Length == 0)
-            return Result.Fail("No global long short account ratios found.");
-        return Result.Ok(ratios);
-    }
-
-    protected override async Task<Result<TakerLongShortRatioCsv[]>> GetCsvTakerLongShortRatiosAsync(string symbol, CancellationToken ct = default)
-    {
-        using IServiceScope scope = serviceProvider.CreateScope();
-        IServiceProvider service = scope.ServiceProvider;
-        using BinanceDbContext db = service.GetService<BinanceDbContext>()!;
-        TakerLongShortRatioCsv[] ratios = await db.FuturesUsdtTakerLongShortRatios.AsNoTracking()
-            .Where(item => item.SymbolInfoId == symbol)
-            .OrderBy(item => item.Timestamp)
-            .Select(item => new TakerLongShortRatioCsv
-            {
-                Timestamp = DateTimeConverter.ConvertToMilliseconds(item.Timestamp).Value,
-                BuySellRatio = item.BuySellRatio,
-                BuyVolume = item.BuyVolume,
-                SellVolume = item.SellVolume,
-                BuyVolumeValue = item.BuyVolumeValue,
-                SellVolumeValue = item.SellVolumeValue
-            }).ToArrayAsync(ct);
-        if (ratios.Length == 0)
-            return Result.Fail("No taker long short ratios found.");
-        return Result.Ok(ratios);
     }
 
 }

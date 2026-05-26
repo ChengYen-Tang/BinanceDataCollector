@@ -1,7 +1,6 @@
 ﻿using BinanceDataCollector.StorageControllers;
 using BinanceDataCollector.WorkItems;
-using CollectorModels.Models;
-using CollectorModels.Models.Csv;
+using CollectorModels.Models.Storage;
 
 namespace BinanceDataCollector.Collectors.CollectorControllers;
 
@@ -108,7 +107,7 @@ internal abstract class CollectorController<T> : ICollectorController
 
     private async Task GatherKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.Kline>> workItem = await storageController.UpdateKlinesAsync(symbol, interval, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.Kline>> workItem = await storageController.UpdateKlinesAsync(symbol, interval, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
@@ -122,70 +121,70 @@ internal abstract class CollectorController<T> : ICollectorController
 
     private async Task GatherPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.PremiumIndexKline>> workItem = await storageController.UpdatePremiumIndexKlinesAsync(symbol, interval, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.PremiumIndexKline>> workItem = await storageController.UpdatePremiumIndexKlinesAsync(symbol, interval, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.PremiumIndexKline>> workItem = await storageController.UpdateIndexPriceKlinesAsync(symbol, interval, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.PremiumIndexKline>> workItem = await storageController.UpdateIndexPriceKlinesAsync(symbol, interval, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.PremiumIndexKline>> workItem = await storageController.UpdateMarkPriceKlinesAsync(symbol, interval, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.PremiumIndexKline>> workItem = await storageController.UpdateMarkPriceKlinesAsync(symbol, interval, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.FundingRate>> workItem = await storageController.UpdateFundingRatesAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.FundingRate>> workItem = await storageController.UpdateFundingRatesAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.OpenInterestHistory>> workItem = await storageController.UpdateOpenInterestHistoriesAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.OpenInterestHistory>> workItem = await storageController.UpdateOpenInterestHistoriesAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.LongShortRatioCsv>> workItem = await storageController.UpdateTopLongShortPositionRatiosAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.LongShortRatioCsv>> workItem = await storageController.UpdateTopLongShortPositionRatiosAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.LongShortRatioCsv>> workItem = await storageController.UpdateTopLongShortAccountRatiosAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.LongShortRatioCsv>> workItem = await storageController.UpdateTopLongShortAccountRatiosAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.LongShortRatioCsv>> workItem = await storageController.UpdateGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.LongShortRatioCsv>> workItem = await storageController.UpdateGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.TakerLongShortRatioCsv>> workItem = await storageController.UpdateTakerLongShortRatiosAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.TakerLongShortRatioCsv>> workItem = await storageController.UpdateTakerLongShortRatiosAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
     private async Task GatherBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<SymbolRows<CollectorModels.Models.Csv.FuturesBasisCsv>> workItem = await storageController.UpdateBasisAsync(symbol, startTime, ct);
+        AsyncWorkItem<SymbolRows<CollectorModels.Models.Storage.FuturesBasisCsv>> workItem = await storageController.UpdateBasisAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }

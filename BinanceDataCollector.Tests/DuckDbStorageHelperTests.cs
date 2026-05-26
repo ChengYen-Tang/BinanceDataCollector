@@ -1,4 +1,4 @@
-using CollectorModels.Models.Csv;
+using CollectorModels.Models.Storage;
 using DuckDB.NET.Data;
 using System.Text.Json;
 
