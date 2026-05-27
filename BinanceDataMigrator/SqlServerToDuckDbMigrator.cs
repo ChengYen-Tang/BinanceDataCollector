@@ -54,15 +54,22 @@ internal sealed class SqlServerToDuckDbMigrator(
         ValidateOptions();
 
         Directory.CreateDirectory(options.StorageRootPath);
+        try
+        {
+            if (options.Markets.Spot)
+                await MigrateSpotAsync(ct);
 
-        if (options.Markets.Spot)
-            await MigrateSpotAsync(ct);
+            if (options.Markets.CoinFutures)
+                await MigrateCoinFuturesAsync(ct);
 
-        if (options.Markets.CoinFutures)
-            await MigrateCoinFuturesAsync(ct);
-
-        if (options.Markets.UsdFutures)
-            await MigrateUsdFuturesAsync(ct);
+            if (options.Markets.UsdFutures)
+                await MigrateUsdFuturesAsync(ct);
+        }
+        finally
+        {
+            DuckDbStorageHelper.CloseAllConnections();
+            logger.LogInformation("Closed all DuckDB connections after migration write phase.");
+        }
     }
 
     private void ValidateOptions()

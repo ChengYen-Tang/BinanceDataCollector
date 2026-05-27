@@ -24,7 +24,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? GetNextKlineStartTime(result.Data.Last().CloseTime, interval) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -47,7 +47,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? GetNextKlineStartTime(result.Data.Last().CloseTime, interval) : startTime.AddDays(200);
             klines.AddRange(result.Data.Select(kline => new BinanceMarkIndexKline
             {
                 OpenPrice = kline.OpenPrice,
@@ -78,7 +78,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? GetNextKlineStartTime(result.Data.Last().CloseTime, interval) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -101,7 +101,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().CloseTime.AddSeconds(1) : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? GetNextKlineStartTime(result.Data.Last().CloseTime, interval) : startTime.AddDays(200);
             klines.AddRange(result.Data);
         }
         return Result.Ok(klines);
@@ -140,7 +140,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            startTime = result.Data.Length != 0 ? result.Data.Last().FundingTime.AddSeconds(1) : startTime.AddDays(200);
+            startTime = result.Data.Length != 0 ? GetNextFundingRateStartTime(result.Data.Last().FundingTime) : startTime.AddDays(200);
             fundingRates.AddRange(result.Data);
         }
         return Result.Ok(fundingRates);
@@ -166,7 +166,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesOpenInterestHistory[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
             openInterestHistories.AddRange(validData);
         }
 
@@ -193,7 +193,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesBasis[] validData = [.. result.Data.Where(item => item.Timestamp != default)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp.AddSeconds(1) : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp) : startTime.AddDays(200);
             basis.AddRange(validData);
         }
 
@@ -220,7 +220,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -246,7 +246,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -272,7 +272,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -298,7 +298,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
             BinanceFuturesBuySellVolumeRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? validData.Last().Timestamp!.Value.AddSeconds(1) : startTime.AddDays(200);
+            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);

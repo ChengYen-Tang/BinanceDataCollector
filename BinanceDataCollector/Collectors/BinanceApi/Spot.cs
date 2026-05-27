@@ -25,7 +25,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                     return Result.Fail(result.Error!.Message);
                 if (result.Data!.Length == 0)
                     break;
-                startTime = result.Data.Last().CloseTime.AddSeconds(1);
+                startTime = GetNextKlineStartTime(result.Data.Last().CloseTime, interval);
                 klines.AddRange(result.Data);
             }
             return Result.Ok(klines);
