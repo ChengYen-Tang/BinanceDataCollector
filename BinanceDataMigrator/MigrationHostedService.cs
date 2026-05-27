@@ -12,9 +12,10 @@ internal sealed class MigrationHostedService(
         {
             MigrationOptions currentOptions = options.Value;
             logger.LogInformation(
-                "Start SQL Server -> DuckDB migration. StorageRootPath: {StorageRootPath}, BatchSize: {BatchSize}",
+                "Start SQL Server -> DuckDB migration. StorageRootPath: {StorageRootPath}, BatchSize: {BatchSize}, MaxParallelSymbols: {MaxParallelSymbols}",
                 currentOptions.StorageRootPath,
-                currentOptions.BatchSize);
+                currentOptions.BatchSize,
+                currentOptions.MaxParallelSymbols);
 
             await migrator.RunAsync(stoppingToken);
 

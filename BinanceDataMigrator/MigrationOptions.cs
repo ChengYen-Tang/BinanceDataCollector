@@ -6,6 +6,8 @@ public sealed class MigrationOptions
 
     public int BatchSize { get; set; } = 10000;
 
+    public int MaxParallelSymbols { get; set; } = 4;
+
     public MarketOptions Markets { get; set; } = new();
 
     public sealed class MarketOptions

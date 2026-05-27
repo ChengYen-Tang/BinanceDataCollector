@@ -79,6 +79,9 @@ internal sealed class SqlServerToDuckDbMigrator(
 
         if (options.BatchSize <= 0)
             throw new InvalidOperationException("Migration:BatchSize must be greater than 0.");
+
+        if (options.MaxParallelSymbols <= 0)
+            throw new InvalidOperationException("Migration:MaxParallelSymbols must be greater than 0.");
     }
 
     private async Task MigrateSpotAsync(CancellationToken ct)
@@ -99,18 +102,18 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         string klineDbPath = GetMarketDbPath("Kline", "Spot");
-        foreach (BinanceSymbolInfo symbol in symbols)
-        {
-            await MigrateShardedTableAsync(
+        await ForEachSymbolAsync(
+            symbols,
+            (symbol, token) => MigrateShardedTableAsync(
                 klineDbPath,
                 "SpotBinanceKlines",
                 symbol.Name,
                 nameof(Kline.CloseTime),
                 CreateKline,
                 OneMinuteKlinePolicy,
-                (repairStart, repairEnd, token) => repairDownloader.GetSpotKlinesAsync(symbol.Name, repairStart, repairEnd, token),
-                ct);
-        }
+                (repairStart, repairEnd, repairToken) => repairDownloader.GetSpotKlinesAsync(symbol.Name, repairStart, repairEnd, repairToken),
+                token),
+            ct);
     }
 
     private async Task MigrateCoinFuturesAsync(CancellationToken ct)
@@ -130,8 +133,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             recreateTable: true,
             ct);
 
-        foreach (BinanceFuturesCoinSymbolInfo symbol in symbols)
-            await MigrateCoinFuturesSymbolAsync(symbol, ct);
+        await ForEachSymbolAsync(symbols, MigrateCoinFuturesSymbolAsync, ct);
     }
 
     private async Task MigrateUsdFuturesAsync(CancellationToken ct)
@@ -151,8 +153,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             recreateTable: true,
             ct);
 
-        foreach (BinanceFuturesUsdtSymbolInfo symbol in symbols)
-            await MigrateUsdFuturesSymbolAsync(symbol, ct);
+        await ForEachSymbolAsync(symbols, MigrateUsdFuturesSymbolAsync, ct);
     }
 
     private async Task MigrateCoinFuturesSymbolAsync(BinanceFuturesCoinSymbolInfo symbol, CancellationToken ct)
@@ -428,6 +429,19 @@ internal sealed class SqlServerToDuckDbMigrator(
             sqlRows.Count,
             finalRows.Count);
     }
+
+    private Task ForEachSymbolAsync<TSymbol>(
+        IReadOnlyCollection<TSymbol> symbols,
+        Func<TSymbol, CancellationToken, Task> migrateAsync,
+        CancellationToken ct)
+        => Parallel.ForEachAsync(
+            symbols,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = options.MaxParallelSymbols,
+                CancellationToken = ct
+            },
+            async (symbol, token) => await migrateAsync(symbol, token));
 
     private async Task<List<TRecord>> ValidateAndRepairRowsAsync<TRecord>(
         string symbolName,
