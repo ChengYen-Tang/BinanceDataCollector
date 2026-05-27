@@ -1,5 +1,7 @@
 using CollectorModels.Models.Storage;
 using DuckDB.NET.Data;
+using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.Json;
 
 namespace BinanceDataCollector.Tests;
@@ -651,6 +653,33 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
+    public async Task ReplaceTableAsync_WhenInitialOpenFails_DoesNotPoisonConnectionCache()
+    {
+        string dbPath = CreateDbPath();
+        Directory.CreateDirectory(dbPath);
+
+        await Assert.ThrowsExactlyAsync<DuckDBException>(async () =>
+            await DuckDbStorageHelper.ReplaceTableAsync(
+                dbPath,
+                "Rows",
+                [new UpsertRecord { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }]));
+
+        Directory.Delete(dbPath, true);
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "Rows",
+            [new UpsertRecord { Id = "2", Name = "ETHUSDT", OccurredAt = new DateTime(2026, 05, 02, 0, 0, 0, DateTimeKind.Utc) }]);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT Id FROM Rows;";
+
+        Assert.AreEqual("2", Convert.ToString(await command.ExecuteScalarAsync()));
+    }
+
+    [TestMethod]
     public async Task ReplaceTableAsync_WhenUsingDifferentPathRepresentations_ReusesSameDatabaseFile()
     {
         string dbPath = CreateDbPath();
@@ -807,6 +836,28 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual(99_000L, observedValues[^1]);
     }
 
+    [TestMethod]
+    public async Task GetMaxInt64Async_WhenWaitingForPathLockAndCanceled_ThrowsOperationCanceledException()
+    {
+        string dbPath = CreateDbPath();
+        string normalizedPath = Path.GetFullPath(dbPath);
+        ConcurrentDictionary<string, SemaphoreSlim> connectionLocks = GetConnectionLocks();
+        SemaphoreSlim heldGate = new(1, 1);
+        connectionLocks[normalizedPath] = heldGate;
+
+        await heldGate.WaitAsync();
+
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
+            await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", nameof(QueryLongRecord.Sequence), ct: cts.Token));
+
+        heldGate.Release();
+        connectionLocks.TryRemove(normalizedPath, out _);
+        heldGate.Dispose();
+    }
+
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
 
@@ -859,6 +910,12 @@ public sealed class DuckDbStorageHelperTests
             closeTimes.Add(reader.GetInt64(0));
 
         return closeTimes;
+    }
+
+    private static ConcurrentDictionary<string, SemaphoreSlim> GetConnectionLocks()
+    {
+        FieldInfo field = typeof(DuckDbStorageHelper).GetField("ConnectionLocks", BindingFlags.Static | BindingFlags.NonPublic)!;
+        return (ConcurrentDictionary<string, SemaphoreSlim>)field.GetValue(null)!;
     }
 
     private sealed class SampleRecord

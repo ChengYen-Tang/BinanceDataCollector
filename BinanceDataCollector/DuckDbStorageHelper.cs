@@ -10,8 +10,13 @@ namespace BinanceDataCollector;
 internal static class DuckDbStorageHelper
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
-    private static readonly ConcurrentDictionary<string, Lazy<DuckDBConnection>> ConnectionCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static readonly ConcurrentDictionary<string, DuckDBConnection> ConnectionCache = new(PathComparer);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(PathComparer);
+    private static readonly object LifecycleSync = new();
+    private static readonly ManualResetEventSlim NoActiveOperations = new(initialState: true);
+    private static int activeOperations;
+    private static bool isClosing;
 
     public static Task ReplaceTableAsync<T>(string dbPath, string tableName, IEnumerable<T> records, CancellationToken ct = default)
         => ReplaceTableAsync(dbPath, tableName, records, null, false, ct);
@@ -24,6 +29,9 @@ internal static class DuckDbStorageHelper
         bool recreateTable,
         CancellationToken ct = default)
     {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
@@ -55,6 +63,9 @@ internal static class DuckDbStorageHelper
 
     public static async Task UpsertRowsAsync<T>(string dbPath, string tableName, IEnumerable<T> records, string keyColumn, CancellationToken ct = default)
     {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
@@ -114,7 +125,7 @@ internal static class DuckDbStorageHelper
             }
 
             return values;
-        });
+        }, ct);
     }
 
     public static async Task<DateTime?> GetMaxDateTimeAsync(
@@ -147,7 +158,7 @@ internal static class DuckDbStorageHelper
                 DateTimeOffset offset => offset.UtcDateTime,
                 _ => Convert.ToDateTime(value)
             };
-        });
+        }, ct);
     }
 
     public static async Task<long?> GetMaxInt64Async(
@@ -175,11 +186,14 @@ internal static class DuckDbStorageHelper
                 return null;
 
             return Convert.ToInt64(value);
-        });
+        }, ct);
     }
 
     public static async Task DeleteRowsBeforeAsync(string dbPath, string tableName, string columnName, DateTime threshold, CancellationToken ct = default)
     {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
@@ -201,6 +215,9 @@ internal static class DuckDbStorageHelper
 
     public static async Task DeleteRowsBeforeAsync(string dbPath, string tableName, string columnName, long threshold, CancellationToken ct = default)
     {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
@@ -222,6 +239,9 @@ internal static class DuckDbStorageHelper
 
     public static async Task DropTableIfExistsAsync(string dbPath, string tableName, CancellationToken ct = default)
     {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
@@ -236,14 +256,20 @@ internal static class DuckDbStorageHelper
 
     public static void CloseAllConnections()
     {
-        foreach ((string _, Lazy<DuckDBConnection> lazyConnection) in ConnectionCache)
+        lock (LifecycleSync)
         {
-            if (!lazyConnection.IsValueCreated)
-                continue;
+            isClosing = true;
+            if (activeOperations == 0)
+                NoActiveOperations.Set();
+        }
 
+        NoActiveOperations.Wait();
+
+        foreach ((string _, DuckDBConnection connection) in ConnectionCache)
+        {
             try
             {
-                lazyConnection.Value.Dispose();
+                connection.Dispose();
             }
             catch
             {
@@ -251,13 +277,16 @@ internal static class DuckDbStorageHelper
         }
 
         ConnectionCache.Clear();
-        ConnectionLocks.Clear();
+
+        lock (LifecycleSync)
+        {
+            isClosing = false;
+            NoActiveOperations.Set();
+        }
     }
 
-    private static DuckDBConnection GetOpenConnection(string dbPath)
-    {
-        string normalizedPath = Path.GetFullPath(dbPath);
-        return ConnectionCache.GetOrAdd(normalizedPath, static path => new Lazy<DuckDBConnection>(() =>
+    private static DuckDBConnection GetOpenConnection(string normalizedPath)
+        => ConnectionCache.GetOrAdd(normalizedPath, static path =>
         {
             string? directoryPath = Path.GetDirectoryName(path);
             if (!string.IsNullOrWhiteSpace(directoryPath))
@@ -266,36 +295,81 @@ internal static class DuckDbStorageHelper
             DuckDBConnection connection = new($"Data Source={path}");
             connection.Open();
             return connection;
-        }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-    }
+        });
 
-    private static async Task WithConnectionLockAsync(string dbPath, Func<string, Task> action)
+    private static async Task WithConnectionLockAsync(string dbPath, Func<string, Task> action, CancellationToken ct = default)
     {
         string normalizedPath = Path.GetFullPath(dbPath);
-        SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync();
+        await EnterOperationAsync(ct);
         try
         {
-            await action(normalizedPath);
+            SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(ct);
+            try
+            {
+                await action(normalizedPath);
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
         finally
         {
-            gate.Release();
+            ExitOperation();
         }
     }
 
-    private static async Task<T> WithConnectionLockAsync<T>(string dbPath, Func<string, Task<T>> action)
+    private static async Task<T> WithConnectionLockAsync<T>(string dbPath, Func<string, Task<T>> action, CancellationToken ct = default)
     {
         string normalizedPath = Path.GetFullPath(dbPath);
-        SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync();
+        await EnterOperationAsync(ct);
         try
         {
-            return await action(normalizedPath);
+            SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(ct);
+            try
+            {
+                return await action(normalizedPath);
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
         finally
         {
-            gate.Release();
+            ExitOperation();
+        }
+    }
+
+    private static async Task EnterOperationAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            lock (LifecycleSync)
+            {
+                if (!isClosing)
+                {
+                    activeOperations++;
+                    NoActiveOperations.Reset();
+                    return;
+                }
+            }
+
+            await Task.Delay(10, ct);
+        }
+    }
+
+    private static void ExitOperation()
+    {
+        lock (LifecycleSync)
+        {
+            activeOperations--;
+            if (activeOperations == 0)
+                NoActiveOperations.Set();
         }
     }
 
