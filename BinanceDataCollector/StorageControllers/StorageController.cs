@@ -1,6 +1,7 @@
 ﻿using BinanceDataCollector.Collectors.BinanceMarketData;
 using BinanceDataCollector.WorkItems;
 using CollectorModels.Models.Storage;
+using DuckDB.NET.Data;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -279,17 +280,17 @@ internal abstract class StorageController<T>
 
     public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateAggTradesAsync(
         T symbol,
-        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        DateTime downloadStartTime,
         CancellationToken ct = default)
     {
-        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}, MonthlyLatestPeriodStart: {MonthlyLatestPeriodStart}, DailyLatestPeriodStart: {DailyLatestPeriodStart}",
-            BaseMarketData.AggTradesDataType, symbol, syncState.DownloadStartTime, syncState.MonthlyLatestPeriodStart, syncState.DailyLatestPeriodStart);
-        Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, syncState, ct);
-        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}, MonthlyLatestPeriodStart: {MonthlyLatestPeriodStart}, DailyLatestPeriodStart: {DailyLatestPeriodStart}",
-            BaseMarketData.AggTradesDataType, symbol, syncState.DownloadStartTime, syncState.MonthlyLatestPeriodStart, syncState.DailyLatestPeriodStart);
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}",
+            BaseMarketData.AggTradesDataType, symbol, downloadStartTime);
+        Result<MarketDataDownloadBatch> result = await GetAggTradesAsync(symbol, downloadStartTime, ct);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}",
+            BaseMarketData.AggTradesDataType, symbol, downloadStartTime);
         if (result.IsFailed)
         {
-            LogSyncFailure(BaseMarketData.AggTradesDataType, symbol, result.Errors[0].Message, startTime: syncState.DownloadStartTime);
+            LogSyncFailure(BaseMarketData.AggTradesDataType, symbol, result.Errors[0].Message, startTime: downloadStartTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
             return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertAggTradesAsync, null, ct);
@@ -485,64 +486,70 @@ internal abstract class StorageController<T>
     {
         if (batch is null || batch.Files.Count == 0)
             return;
+        ct.ThrowIfCancellationRequested();
 
-        string symbolPath = GetMarketDataSymbolPath(batch.DataType, batch.Symbol);
-        Directory.CreateDirectory(symbolPath);
-        logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
+        await EnsureAggTradesStorageMigratedAsync(batch.Symbol, ct);
+        string databasePath = GetAggTradesDatabasePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
 
-        foreach (MarketDataDownloadFile file in batch.Files)
+        logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
+            batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
+
+        using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
+        EnsureAggTradesTable(connection, batch.Symbol);
+
+        MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetAggTradesDownloadFileSortKey)];
+        foreach (MarketDataDownloadFile file in sortedFiles)
         {
-            ct.ThrowIfCancellationRequested();
+            string extractionDirectory = file.TempZipPath + ".__extract";
 
-            string periodDirectory = GetAggTradesPeriodDirectoryName(file);
-            string periodRootDirectory = Path.Combine(symbolPath, GetPeriodFolderName(file.Period));
-            string destinationDirectory = Path.Combine(periodRootDirectory, periodDirectory);
-            string stagingDirectory = destinationDirectory + ".__staging";
-
-            if (Directory.Exists(stagingDirectory))
-                Directory.Delete(stagingDirectory, true);
-
-            Directory.CreateDirectory(stagingDirectory);
+            if (Directory.Exists(extractionDirectory))
+                Directory.Delete(extractionDirectory, true);
+            Directory.CreateDirectory(extractionDirectory);
             try
             {
-                await ExtractArchiveWithChecksumsAsync(file.TempZipPath, stagingDirectory, ct);
-                await File.WriteAllTextAsync(Path.Combine(stagingDirectory, "_SUCCESS"), string.Empty, ct);
+                string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
+                foreach (string csvPath in extractedCsvPaths.OrderBy(GetAggTradesCsvSortKey))
+                    ReplaceAggTradesTailFromCsv(connection, batch.Symbol, csvPath);
 
-                if (Directory.Exists(destinationDirectory))
-                    Directory.Delete(destinationDirectory, true);
-
-                Directory.CreateDirectory(periodRootDirectory);
-                Directory.Move(stagingDirectory, destinationDirectory);
+                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
-                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath));
-                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempChecksumPath));
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
+                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath)!);
             }
             catch (OperationCanceledException)
             {
-                if (Directory.Exists(stagingDirectory))
-                    Directory.Delete(stagingDirectory, true);
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
                 throw;
             }
             catch (Exception ex)
             {
-                if (Directory.Exists(stagingDirectory))
-                    Directory.Delete(stagingDirectory, true);
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
                 logger.LogError(ex,
                     "Persist aggTrades archive failed. Market: {Market}, Symbol: {Symbol}, Period: {Period}, FileName: {FileName}",
                     batch.MarketPathSegment, batch.Symbol, file.Period, file.FileName);
             }
         }
 
-        logger.LogDebug("Finish persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}", batch.MarketPathSegment, batch.Symbol, batch.Files.Count);
+        logger.LogDebug("Finish persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
+            batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
     }
 
-    public virtual Task<(DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart)> GetLastAggTradesAsync(T symbol, CancellationToken ct = default)
+    public virtual async Task<DateTime> GetLastAggTradesAsync(T symbol, CancellationToken ct = default)
     {
-        string symbolPath = GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, GetSymbolName(symbol));
-        DateTime? lastMonthlyDate = GetLastCompletedPeriod(Path.Combine(symbolPath, "Monthly"), "yyyy-MM");
-        DateTime? lastDailyDate = GetLastCompletedPeriod(Path.Combine(symbolPath, "Daily"), "yyyy-MM-dd");
-        return Task.FromResult((yearsReserved, lastMonthlyDate, lastDailyDate));
+        string symbolName = GetSymbolName(symbol);
+        await EnsureAggTradesStorageMigratedAsync(symbolName, ct);
+
+        string databasePath = GetAggTradesDatabasePath();
+        if (!File.Exists(databasePath))
+            return yearsReserved;
+
+        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "transact_time", null, ct);
+        return latest ?? yearsReserved;
     }
 
     protected async Task<DateTime> GetLastTimestampAsync(
@@ -601,7 +608,7 @@ internal abstract class StorageController<T>
 
     protected abstract Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(
         T symbol,
-        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        DateTime downloadStartTime,
         CancellationToken ct = default);
     protected abstract Task<Result<List<Kline>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
@@ -643,79 +650,310 @@ internal abstract class StorageController<T>
     {
         ct.ThrowIfCancellationRequested();
 
-        string symbolPath = GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbolName);
-        string monthlyRootPath = Path.Combine(symbolPath, "Monthly");
-        string dailyRootPath = Path.Combine(symbolPath, "Daily");
+        string legacySymbolPath = GetLegacyAggTradesSymbolPath(symbolName);
+        if (Directory.Exists(legacySymbolPath))
+            Directory.Delete(legacySymbolPath, true);
 
-        DeleteOverlappedAggTradesDailyDirectories(monthlyRootPath, dailyRootPath, ct);
-        DeleteExpiredAggTradesDirectories(monthlyRootPath, dailyRootPath, ct);
+        string databasePath = GetAggTradesDatabasePath();
+        if (!File.Exists(databasePath))
+            return Task.CompletedTask;
 
-        DeleteDirectoryIfEmpty(monthlyRootPath);
-        DeleteDirectoryIfEmpty(dailyRootPath);
-        DeleteDirectoryIfEmpty(symbolPath);
-
-        return Task.CompletedTask;
+        return DeleteOldAggTradesRowsAsync(databasePath, symbolName, ct);
     }
 
-    private void DeleteOverlappedAggTradesDailyDirectories(string monthlyRootPath, string dailyRootPath, CancellationToken ct)
+    protected async Task DeleteAggTradesStorageAsync(IReadOnlyCollection<string> symbols, CancellationToken ct = default)
     {
-        if (!Directory.Exists(monthlyRootPath) || !Directory.Exists(dailyRootPath))
-            return;
-
-        foreach (string monthlyDirectory in Directory.EnumerateDirectories(monthlyRootPath))
+        foreach (string symbol in symbols)
         {
             ct.ThrowIfCancellationRequested();
 
-            string monthName = Path.GetFileName(monthlyDirectory);
-            if (!File.Exists(Path.Combine(monthlyDirectory, "_SUCCESS")))
-                continue;
+            await DuckDbStorageHelper.DropTableIfExistsAsync(GetAggTradesDatabasePath(), symbol, ct);
 
-            if (!DateTime.TryParseExact(monthName, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
-                continue;
-
-            foreach (string dailyDirectory in Directory.EnumerateDirectories(dailyRootPath, $"{month:yyyy-MM}-*"))
-            {
-                ct.ThrowIfCancellationRequested();
-                Directory.Delete(dailyDirectory, true);
-            }
+            string legacySymbolPath = GetLegacyAggTradesSymbolPath(symbol);
+            if (Directory.Exists(legacySymbolPath))
+                Directory.Delete(legacySymbolPath, true);
         }
     }
 
-    private void DeleteExpiredAggTradesDirectories(string monthlyRootPath, string dailyRootPath, CancellationToken ct)
+    private async Task EnsureAggTradesStorageMigratedAsync(string symbolName, CancellationToken ct)
     {
-        DateTime reservedDate = yearsReserved.Date;
+        ct.ThrowIfCancellationRequested();
 
-        if (Directory.Exists(monthlyRootPath))
-        {
-            foreach (string monthlyDirectory in Directory.EnumerateDirectories(monthlyRootPath))
-            {
-                ct.ThrowIfCancellationRequested();
-
-                string monthName = Path.GetFileName(monthlyDirectory);
-                if (!DateTime.TryParseExact(monthName, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
-                    continue;
-
-                DateTime monthEnd = new DateTime(month.Year, month.Month, DateTime.DaysInMonth(month.Year, month.Month));
-                if (monthEnd < reservedDate)
-                    Directory.Delete(monthlyDirectory, true);
-            }
-        }
-
-        if (!Directory.Exists(dailyRootPath))
+        string legacySymbolPath = GetLegacyAggTradesSymbolPath(symbolName);
+        if (!Directory.Exists(legacySymbolPath))
             return;
 
-        foreach (string dailyDirectory in Directory.EnumerateDirectories(dailyRootPath))
+        string databasePath = GetAggTradesDatabasePath();
+        DateTime? existingLatest = File.Exists(databasePath)
+            ? await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "transact_time", null, ct)
+            : null;
+        if (existingLatest.HasValue)
         {
-            ct.ThrowIfCancellationRequested();
+            Directory.Delete(legacySymbolPath, true);
+            return;
+        }
 
-            string dayName = Path.GetFileName(dailyDirectory);
-            if (!DateTime.TryParseExact(dayName, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out DateTime day))
-                continue;
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
 
-            if (day < reservedDate)
-                Directory.Delete(dailyDirectory, true);
+        logger.LogInformation("Start migrating aggTrades legacy storage. Market: {Market}, Symbol: {Symbol}, LegacyPath: {LegacyPath}, DatabasePath: {DatabasePath}",
+            MarketPathSegment, symbolName, legacySymbolPath, databasePath);
+
+        try
+        {
+            string[] csvPaths = Directory
+                .EnumerateFiles(legacySymbolPath, "*.csv", SearchOption.AllDirectories)
+                .OrderBy(GetAggTradesCsvSortKey)
+                .ToArray();
+
+            if (csvPaths.Length == 0)
+            {
+                Directory.Delete(legacySymbolPath, true);
+                return;
+            }
+
+            if (File.Exists(databasePath))
+            {
+                using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
+                EnsureAggTradesTable(connection, symbolName);
+                foreach (string csvPath in csvPaths)
+                    AppendAggTradesFromCsv(connection, symbolName, csvPath);
+                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+            }
+            else
+            {
+                string stagingDatabasePath = databasePath + ".__staging";
+                DeleteFileIfExists(stagingDatabasePath);
+                using DuckDBConnection connection = OpenDuckDbConnection(stagingDatabasePath);
+                EnsureAggTradesTable(connection, symbolName);
+                foreach (string csvPath in csvPaths)
+                    AppendAggTradesFromCsv(connection, symbolName, csvPath);
+
+                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+                connection.Close();
+                File.Move(stagingDatabasePath, databasePath);
+            }
+
+            Directory.Delete(legacySymbolPath, true);
+            logger.LogInformation("Finish migrating aggTrades legacy storage. Market: {Market}, Symbol: {Symbol}, ImportedFiles: {ImportedFiles}",
+                MarketPathSegment, symbolName, csvPaths.Length);
+        }
+        catch
+        {
+            DeleteFileIfExists(databasePath + ".__staging");
+            throw;
         }
     }
+
+    private string GetAggTradesDatabasePath()
+        => Path.Combine(DataPath, BaseMarketData.AggTradesDataType, $"{MarketPathSegment}.duckdb");
+
+    private string GetLegacyAggTradesSymbolPath(string symbol)
+        => GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbol);
+
+    private static DuckDBConnection OpenDuckDbConnection(string databasePath)
+    {
+        DuckDBConnection connection = new($"Data Source={databasePath}");
+        connection.Open();
+        return connection;
+    }
+
+    private static void EnsureAggTradesTable(DuckDBConnection connection, string tableName)
+        => ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
+                parquetagg_trade_id BIGINT,
+                price DOUBLE,
+                quantity DOUBLE,
+                first_trade_id BIGINT,
+                last_trade_id BIGINT,
+                transact_time TIMESTAMP,
+                is_buyer_maker BOOLEAN
+            );
+            """);
+
+    private static void ReplaceAggTradesTailFromCsv(DuckDBConnection connection, string tableName, string csvPath)
+    {
+        BuildAggTradesStagingTable(connection, csvPath);
+
+        DateTime? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(transact_time) FROM staging_agg_trades_deduped;") switch
+        {
+            null => null,
+            DBNull => null,
+            object value => Convert.ToDateTime(value)
+        };
+
+        if (!replaceFrom.HasValue)
+        {
+            DropAggTradesStagingTables(connection);
+            return;
+        }
+
+        using DuckDBTransaction transaction = connection.BeginTransaction();
+
+        using (DuckDBCommand deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE transact_time >= $replace_from;";
+            deleteCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom.Value));
+            deleteCommand.ExecuteNonQuery();
+        }
+
+        using (DuckDBCommand insertCommand = connection.CreateCommand())
+        {
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = $"""
+                INSERT INTO {QuoteIdentifier(tableName)}
+                SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
+                FROM staging_agg_trades_deduped
+                ORDER BY transact_time, parquetagg_trade_id;
+                """;
+            insertCommand.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        DropAggTradesStagingTables(connection);
+    }
+
+    private static void AppendAggTradesFromCsv(DuckDBConnection connection, string tableName, string csvPath)
+    {
+        BuildAggTradesStagingTable(connection, csvPath);
+
+        using DuckDBCommand insertCommand = connection.CreateCommand();
+        insertCommand.CommandText = $"""
+            INSERT INTO {QuoteIdentifier(tableName)}
+            SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
+            FROM staging_agg_trades_deduped
+            ORDER BY transact_time, parquetagg_trade_id;
+            """;
+        insertCommand.ExecuteNonQuery();
+
+        DropAggTradesStagingTables(connection);
+    }
+
+    private static void BuildAggTradesStagingTable(DuckDBConnection connection, string csvPath)
+    {
+        DropAggTradesStagingTables(connection);
+
+        string csvLiteral = ToSqlStringLiteral(csvPath);
+        ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TEMP TABLE staging_agg_trades AS
+            SELECT
+                CAST(column0 AS BIGINT) AS parquetagg_trade_id,
+                CAST(column1 AS DOUBLE) AS price,
+                CAST(column2 AS DOUBLE) AS quantity,
+                CAST(column3 AS BIGINT) AS first_trade_id,
+                CAST(column4 AS BIGINT) AS last_trade_id,
+                make_timestamp_ms(CAST(column5 AS BIGINT)) AS transact_time,
+                CAST(column6 AS BOOLEAN) AS is_buyer_maker
+            FROM read_csv({csvLiteral}, header = false, all_varchar = true);
+            """);
+
+        ExecuteDuckDbNonQuery(connection, """
+            CREATE TEMP TABLE staging_agg_trades_deduped AS
+            SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
+            FROM (
+                SELECT
+                    parquetagg_trade_id,
+                    price,
+                    quantity,
+                    first_trade_id,
+                    last_trade_id,
+                    transact_time,
+                    is_buyer_maker,
+                    ROW_NUMBER() OVER (PARTITION BY parquetagg_trade_id ORDER BY transact_time DESC, parquetagg_trade_id DESC) AS row_num
+                FROM staging_agg_trades
+            )
+            WHERE row_num = 1;
+            """);
+    }
+
+    private static void DropAggTradesStagingTables(DuckDBConnection connection)
+        => ExecuteDuckDbNonQuery(connection, """
+            DROP TABLE IF EXISTS staging_agg_trades_deduped;
+            DROP TABLE IF EXISTS staging_agg_trades;
+            """);
+
+    private static object? ExecuteDuckDbScalar(DuckDBConnection connection, string commandText)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = commandText;
+        return command.ExecuteScalar();
+    }
+
+    private static void ExecuteDuckDbNonQuery(DuckDBConnection connection, string commandText)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = commandText;
+        command.ExecuteNonQuery();
+    }
+
+    private static async Task<string[]> ExtractArchiveEntriesAsync(string archivePath, string destinationDirectory, CancellationToken ct)
+    {
+        List<string> extractedPaths = [];
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(entry.Name))
+                continue;
+
+            string destinationPath = Path.Combine(destinationDirectory, entry.Name);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+
+            await using Stream source = entry.Open();
+            await using FileStream destination = File.Create(destinationPath);
+            await source.CopyToAsync(destination, ct);
+            extractedPaths.Add(destinationPath);
+        }
+
+        if (extractedPaths.Count == 0)
+            throw new InvalidDataException($"Archive does not contain any files: {archivePath}");
+
+        return [.. extractedPaths];
+    }
+
+    private static DateTime GetAggTradesDownloadFileSortKey(MarketDataDownloadFile file)
+    {
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(file.FileName);
+        string prefix = $"{file.Symbol}-{file.DataType}-";
+        if (!fileNameWithoutExtension.StartsWith(prefix, StringComparison.Ordinal))
+            return DateTime.MaxValue;
+
+        string period = fileNameWithoutExtension[prefix.Length..];
+        if (DateTime.TryParseExact(period, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
+            return month;
+        if (DateTime.TryParseExact(period, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out DateTime day))
+            return day;
+        return DateTime.MaxValue;
+    }
+
+    private static DateTime GetAggTradesCsvSortKey(string csvPath)
+    {
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(csvPath);
+        int separatorIndex = fileNameWithoutExtension.LastIndexOf('-');
+        if (separatorIndex < 0)
+            return DateTime.MaxValue;
+
+        string period = fileNameWithoutExtension[(fileNameWithoutExtension.LastIndexOf('-', separatorIndex - 1) + 1)..];
+        if (DateTime.TryParseExact(period, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
+            return month;
+        if (DateTime.TryParseExact(period, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out DateTime day))
+            return day;
+        return DateTime.MaxValue;
+    }
+
+    private static string ToSqlStringLiteral(string value)
+        => $"'{value.Replace("'", "''")}'";
+
+    private async Task DeleteOldAggTradesRowsAsync(string databasePath, string tableName, CancellationToken ct)
+    {
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "transact_time", yearsReserved, ct);
+        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, tableName, "transact_time", null, ct);
+        if (!latest.HasValue)
+            await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
+    }
+
+    private static string QuoteIdentifier(string value)
+        => "\"" + value.Replace("\"", "\"\"") + "\"";
 
     private string GetMarketDataMarketPath(string dataType)
         => Path.Combine(MarketDataPath, dataType, MarketPathSegment);
@@ -725,74 +963,6 @@ internal abstract class StorageController<T>
 
     protected string GetMarketDataTempSymbolPath(string dataType, string symbol)
         => Path.Combine(MarketDataTempPath, dataType, MarketPathSegment, symbol);
-
-    private static string GetPeriodFolderName(string period)
-        => period.Equals("monthly", StringComparison.OrdinalIgnoreCase) ? "Monthly"
-        : period.Equals("daily", StringComparison.OrdinalIgnoreCase) ? "Daily"
-        : throw new InvalidDataException($"Unsupported market data period: {period}");
-
-    private static string GetAggTradesPeriodDirectoryName(MarketDataDownloadFile file)
-    {
-        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(file.FileName);
-        string prefix = $"{file.Symbol}-{file.DataType}-";
-        if (!fileNameWithoutExtension.StartsWith(prefix, StringComparison.Ordinal))
-            throw new InvalidDataException($"Invalid market data file name: {file.FileName}");
-
-        return fileNameWithoutExtension[prefix.Length..];
-    }
-
-    private static DateTime? GetLastCompletedPeriod(string rootDirectory, string format)
-    {
-        if (!Directory.Exists(rootDirectory))
-            return null;
-
-        DateTime? latest = null;
-        foreach (string directory in Directory.EnumerateDirectories(rootDirectory))
-        {
-            string periodName = Path.GetFileName(directory);
-            if (!File.Exists(Path.Combine(directory, "_SUCCESS")))
-                continue;
-
-            if (!DateTime.TryParseExact(periodName, format, null, System.Globalization.DateTimeStyles.None, out DateTime parsed))
-                continue;
-
-            if (!latest.HasValue || parsed > latest.Value)
-                latest = parsed;
-        }
-
-        return latest;
-    }
-
-    private static async Task ExtractArchiveWithChecksumsAsync(string archivePath, string destinationDirectory, CancellationToken ct)
-    {
-        int extractedFileCount = 0;
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
-        foreach (ZipArchiveEntry entry in archive.Entries)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(entry.Name))
-                continue;
-
-            string entryPath = Path.Combine(destinationDirectory, entry.Name);
-            await using (Stream source = entry.Open())
-            await using (FileStream destination = File.Create(entryPath))
-                await source.CopyToAsync(destination, ct);
-
-            string checksum = await ComputeSha256Async(entryPath, ct);
-            await File.WriteAllTextAsync(Path.Combine(destinationDirectory, entry.Name + ".CHECKSUM"), $"{checksum}  {entry.Name}", ct);
-            extractedFileCount++;
-        }
-
-        if (extractedFileCount == 0)
-            throw new InvalidDataException($"Archive does not contain any files: {archivePath}");
-    }
-
-    private static async Task<string> ComputeSha256Async(string path, CancellationToken ct)
-    {
-        await using FileStream stream = File.OpenRead(path);
-        byte[] hash = await SHA256.HashDataAsync(stream, ct);
-        return Convert.ToHexString(hash);
-    }
 
     private static void DeleteFileIfExists(string path)
     {

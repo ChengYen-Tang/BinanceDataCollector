@@ -30,8 +30,6 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     protected override string TakerLongShortRatioPath => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
     protected override string BasisPath => throw new NotSupportedException("Spot market does not support basis.");
     protected override bool IsFutures => false;
-    private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
-
     protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
 
@@ -41,7 +39,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
         await DeleteSymbolTablesAsync([KlinePath], delistedSymbols, ct);
-        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, MarketDataTypes, ct);
+        await DeleteAggTradesStorageAsync(delistedSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -109,8 +107,8 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
-        => spotMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
+        => spotMarketData.DownloadAggTradesAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     protected override Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();

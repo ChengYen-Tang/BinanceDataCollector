@@ -20,14 +20,14 @@ internal abstract class BaseMarketData
     protected abstract string MarketDataRemotePathSegment { get; }
     public abstract Task<Result<MarketDataDownloadBatch>> DownloadAggTradesAsync(
         string symbol,
-        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        DateTime downloadStartTime,
         string tempSymbolPath,
         CancellationToken ct = default);
 
     protected async Task<Result<MarketDataDownloadBatch>> DownloadAsync(
         string dataType,
         string symbol,
-        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        DateTime downloadStartTime,
         string tempSymbolPath,
         CancellationToken ct = default)
     {
@@ -35,11 +35,9 @@ internal abstract class BaseMarketData
         {
             DateTime todayUtc = DateTime.UtcNow.Date;
             DateTime lastDailyDate = todayUtc.AddDays(-1);
-            DateTime downloadStartTime = syncState.DownloadStartTime.Date;
-            DateTime? monthlyLatestPeriodStart = syncState.MonthlyLatestPeriodStart?.Date;
-            DateTime? dailyLatestPeriodStart = syncState.DailyLatestPeriodStart?.Date;
-            DateTime monthlyStart = monthlyLatestPeriodStart?.AddMonths(1) ?? new DateTime(downloadStartTime.Year, downloadStartTime.Month, 1);
-            DateTime dailyStartDate = dailyLatestPeriodStart?.AddDays(1) ?? downloadStartTime;
+            DateTime downloadStartDate = downloadStartTime.Date;
+            DateTime monthlyStart = new(downloadStartDate.Year, downloadStartDate.Month, 1);
+            DateTime dailyStartDate = downloadStartDate;
 
             if (monthlyStart > lastDailyDate && dailyStartDate > lastDailyDate)
                 return Result.Ok(CreateEmptyBatch(dataType, symbol));
@@ -48,7 +46,7 @@ internal abstract class BaseMarketData
             DateTime lastCompletedMonth = currentMonthStart.AddMonths(-1);
 
             List<MarketDataDownloadFile> files = [];
-            DateTime? maxMonthlyCoveredMonth = monthlyLatestPeriodStart;
+            DateTime? maxMonthlyCoveredMonth = null;
             if (monthlyStart <= lastCompletedMonth)
             {
                 IReadOnlyList<string> monthlyFileNames = await GetAvailableMonthlyFileNamesAsync(dataType, symbol, monthlyStart, lastCompletedMonth, ct);

@@ -47,9 +47,9 @@ internal abstract class CollectorController<T> : ICollectorController
         AsyncWorkItem<T, KlineInterval, DateTime> workItem = new(GatherKlinesAsync, symbol, interval, startTime, ct, BuildWorkItemDescription("Klines", symbol, interval, startTime));
         if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.GatherChannel.Writer.WriteAsync(workItem, ct);
-        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) aggTradesSyncState = await storageController.GetLastAggTradesAsync(symbol, ct);
-        AsyncWorkItem<T, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart)> aggTradesWorkItem
-            = new(GatherAggTradesAsync, symbol, aggTradesSyncState, ct, BuildWorkItemDescription("AggTrades", symbol, startTime: aggTradesSyncState.DownloadStartTime));
+        DateTime aggTradesStartTime = await storageController.GetLastAggTradesAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> aggTradesWorkItem
+            = new(GatherAggTradesAsync, symbol, aggTradesStartTime, ct, BuildWorkItemDescription("AggTrades", symbol, startTime: aggTradesStartTime));
         if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.GatherChannel.Writer.WriteAsync(aggTradesWorkItem, ct);
         if (!IsFutures)
@@ -112,9 +112,9 @@ internal abstract class CollectorController<T> : ICollectorController
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
 
-    private async Task GatherAggTradesAsync(T symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
+    private async Task GatherAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
-        AsyncWorkItem<BinanceMarketData.MarketDataDownloadBatch?> workItem = await storageController.UpdateAggTradesAsync(symbol, syncState, ct);
+        AsyncWorkItem<BinanceMarketData.MarketDataDownloadBatch?> workItem = await storageController.UpdateAggTradesAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }

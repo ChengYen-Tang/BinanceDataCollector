@@ -31,8 +31,6 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
     protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market + ".duckdb"); } }
     protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market + ".duckdb"); } }
     protected override bool IsFutures => true;
-    private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
-
     protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
 
@@ -55,7 +53,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             GlobalLongShortAccountRatioPath,
             TakerLongShortRatioPath,
         ], delistedSymbols, ct);
-        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, MarketDataTypes, ct);
+        await DeleteAggTradesStorageAsync(delistedSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -112,8 +110,8 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
-        => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
+        => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     public override Task<DateTime> GetLastFundingTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
         => GetLastTimestampAsync(FundingRatePath, symbol.Name, nameof(FundingRate.FundingTime), null, ct);
