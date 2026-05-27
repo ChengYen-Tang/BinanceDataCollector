@@ -5,6 +5,7 @@ using System.Text.Json;
 namespace BinanceDataCollector.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class DuckDbStorageHelperTests
 {
     private string tempDirectory = null!;
@@ -19,6 +20,8 @@ public sealed class DuckDbStorageHelperTests
     [TestCleanup]
     public void Cleanup()
     {
+        DuckDbStorageHelper.CloseAllConnections();
+
         if (Directory.Exists(tempDirectory))
             Directory.Delete(tempDirectory, true);
     }
@@ -78,6 +81,85 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual("Archived", reader.GetString(7));
         CollectionAssert.AreEqual(replacement[0].Tags, JsonSerializer.Deserialize<string[]>(reader.GetString(8))!);
         Assert.IsFalse(await reader.ReadAsync());
+    }
+
+    [TestMethod]
+    public async Task ReplaceTableAsync_WhenRowsContainNullValues_PersistsDbNulls()
+    {
+        string dbPath = CreateDbPath();
+        NullableRecord[] rows =
+        [
+            new()
+            {
+                Id = "1",
+                OptionalName = null,
+                OptionalCount = null,
+                OptionalOccurredAt = null,
+                OptionalStatus = null
+            }
+        ];
+
+        await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Rows", rows, nameof(NullableRecord.Id), recreateTable: true);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT OptionalName, OptionalCount, OptionalOccurredAt, OptionalStatus FROM Rows;";
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.IsTrue(reader.IsDBNull(0));
+        Assert.IsTrue(reader.IsDBNull(1));
+        Assert.IsTrue(reader.IsDBNull(2));
+        Assert.IsTrue(reader.IsDBNull(3));
+    }
+
+    [TestMethod]
+    public async Task ReplaceTableAsync_WhenRecordContainsEnumCollection_PersistsAsJsonStringArray()
+    {
+        string dbPath = CreateDbPath();
+        EnumCollectionRecord[] rows =
+        [
+            new()
+            {
+                Id = "1",
+                States = [SampleStatus.Live, SampleStatus.Archived]
+            }
+        ];
+
+        await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Rows", rows);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT States FROM Rows;";
+        string payload = Convert.ToString(await command.ExecuteScalarAsync())!;
+
+        CollectionAssert.AreEqual(new[] { "Live", "Archived" }, JsonSerializer.Deserialize<string[]>(payload)!);
+    }
+
+    [TestMethod]
+    public async Task ReplaceTableAsync_WhenCalledWithEmptyReplacement_ClearsExistingRowsAndKeepsTableQueryable()
+    {
+        string dbPath = CreateDbPath();
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "Rows",
+            new[]
+            {
+                new UpsertRecord { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }
+            });
+
+        await DuckDbStorageHelper.ReplaceTableAsync<UpsertRecord>(dbPath, "Rows", []);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM Rows;";
+
+        object? count = await command.ExecuteScalarAsync();
+        Assert.AreEqual(0, Convert.ToInt32(count));
     }
 
     [TestMethod]
@@ -177,6 +259,30 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
+    public async Task UpsertRowsAsync_WhenKeyColumnDoesNotExist_ThrowsInvalidOperationException()
+    {
+        string dbPath = CreateDbPath();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await DuckDbStorageHelper.UpsertRowsAsync(
+                dbPath,
+                "Symbols",
+                [new UpsertRecord { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }],
+                "MissingKey"));
+    }
+
+    [TestMethod]
+    public async Task UpsertRowsAsync_WhenRecordsAreEmpty_DoesNotCreateTable()
+    {
+        string dbPath = CreateDbPath();
+
+        await DuckDbStorageHelper.UpsertRowsAsync<UpsertRecord>(dbPath, "Symbols", [], nameof(UpsertRecord.Id));
+
+        long? max = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Symbols", nameof(QueryLongRecord.Sequence));
+        Assert.IsNull(max);
+    }
+
+    [TestMethod]
     public async Task GetStringValuesAndGetMaxDateTimeAsync_ReturnExpectedResults()
     {
         string dbPath = CreateDbPath();
@@ -224,6 +330,84 @@ public sealed class DuckDbStorageHelperTests
 
         object? count = await command.ExecuteScalarAsync();
         Assert.AreEqual(1, Convert.ToInt32(count));
+    }
+
+    [TestMethod]
+    public async Task GetStringValuesAsync_WhenDatabaseOrTableDoesNotExist_ReturnsEmptyList()
+    {
+        string dbPath = CreateDbPath();
+
+        List<string> valuesFromMissingDb = await DuckDbStorageHelper.GetStringValuesAsync(dbPath, "Rows", "Name");
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "OtherRows",
+            [new UpsertRecord { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }]);
+        List<string> valuesFromMissingTable = await DuckDbStorageHelper.GetStringValuesAsync(dbPath, "Rows", "Name");
+
+        Assert.IsEmpty(valuesFromMissingDb);
+        Assert.IsEmpty(valuesFromMissingTable);
+    }
+
+    [TestMethod]
+    public async Task GetMaxDateTimeAsyncAndGetMaxInt64Async_WhenDatabaseOrTableDoesNotExist_ReturnNull()
+    {
+        string dbPath = CreateDbPath();
+
+        DateTime? missingDate = await DuckDbStorageHelper.GetMaxDateTimeAsync(dbPath, "Rows", nameof(QueryRecord.OccurredAt));
+        long? missingLong = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", nameof(QueryLongRecord.Sequence));
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "OtherRows",
+            [new QueryLongRecord { Id = "1", Sequence = 123 }]);
+
+        DateTime? missingTableDate = await DuckDbStorageHelper.GetMaxDateTimeAsync(dbPath, "Rows", nameof(QueryRecord.OccurredAt));
+        long? missingTableLong = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", nameof(QueryLongRecord.Sequence));
+
+        Assert.IsNull(missingDate);
+        Assert.IsNull(missingLong);
+        Assert.IsNull(missingTableDate);
+        Assert.IsNull(missingTableLong);
+    }
+
+    [TestMethod]
+    public async Task DeleteRowsBeforeAsyncAndDropTableIfExistsAsync_WhenDatabaseOrTableDoesNotExist_DoNotThrow()
+    {
+        string dbPath = CreateDbPath();
+
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(dbPath, "Rows", nameof(QueryRecord.OccurredAt), new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc));
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(dbPath, "Rows", nameof(QueryLongRecord.Sequence), 100L);
+        await DuckDbStorageHelper.DropTableIfExistsAsync(dbPath, "Rows");
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "OtherRows",
+            [new QueryLongRecord { Id = "1", Sequence = 123 }]);
+
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(dbPath, "Rows", nameof(QueryRecord.OccurredAt), new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc));
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(dbPath, "Rows", nameof(QueryLongRecord.Sequence), 100L);
+        await DuckDbStorageHelper.DropTableIfExistsAsync(dbPath, "Rows");
+    }
+
+    [TestMethod]
+    public async Task GetMaxDateTimeAsync_WhenFilteredByNullValue_ReturnsMatchingRow()
+    {
+        string dbPath = CreateDbPath();
+        NullableRecord[] rows =
+        [
+            new() { Id = "1", OptionalName = null, OptionalOccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Id = "2", OptionalName = "BTCUSDT", OptionalOccurredAt = new DateTime(2026, 05, 02, 0, 0, 0, DateTimeKind.Utc) }
+        ];
+
+        await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Rows", rows);
+
+        DateTime? max = await DuckDbStorageHelper.GetMaxDateTimeAsync(
+            dbPath,
+            "Rows",
+            nameof(NullableRecord.OptionalOccurredAt),
+            new Dictionary<string, object?> { [nameof(NullableRecord.OptionalName)] = null });
+
+        Assert.AreEqual(new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc), max);
     }
 
     [TestMethod]
@@ -389,6 +573,240 @@ public sealed class DuckDbStorageHelperTests
         CollectionAssert.AreEqual(new long[] { 3_000 }, remaining);
     }
 
+    [TestMethod]
+    public async Task CloseAllConnections_WhenDatabaseWasWritten_ReleasesFileHandle()
+    {
+        string dbPath = CreateDbPath();
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "Rows",
+            new[]
+            {
+                new UpsertRecord
+                {
+                    Id = "1",
+                    Name = "BTCUSDT",
+                    OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        DuckDbStorageHelper.CloseAllConnections();
+
+        File.Delete(dbPath);
+
+        Assert.IsFalse(File.Exists(dbPath));
+    }
+
+    [TestMethod]
+    public void CloseAllConnections_WhenCalledMultipleTimes_IsIdempotent()
+    {
+        DuckDbStorageHelper.CloseAllConnections();
+        DuckDbStorageHelper.CloseAllConnections();
+    }
+
+    [TestMethod]
+    public async Task ReplaceTableAsync_AfterCloseAllConnections_ReopensDatabaseAndContinuesWriting()
+    {
+        string dbPath = CreateDbPath();
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "Rows",
+            new[]
+            {
+                new UpsertRecord
+                {
+                    Id = "1",
+                    Name = "BTCUSDT",
+                    OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        DuckDbStorageHelper.CloseAllConnections();
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "Rows",
+            new[]
+            {
+                new UpsertRecord
+                {
+                    Id = "2",
+                    Name = "ETHUSDT",
+                    OccurredAt = new DateTime(2026, 05, 02, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Name FROM Rows;";
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual("2", reader.GetString(0));
+        Assert.AreEqual("ETHUSDT", reader.GetString(1));
+        Assert.IsFalse(await reader.ReadAsync());
+    }
+
+    [TestMethod]
+    public async Task ReplaceTableAsync_WhenUsingDifferentPathRepresentations_ReusesSameDatabaseFile()
+    {
+        string dbPath = CreateDbPath();
+        string relativePath = Path.GetRelativePath(Directory.GetCurrentDirectory(), dbPath);
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            relativePath,
+            "Rows",
+            [new UpsertRecord { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }]);
+
+        await DuckDbStorageHelper.UpsertRowsAsync(
+            dbPath,
+            "Rows",
+            [new UpsertRecord { Id = "2", Name = "ETHUSDT", OccurredAt = new DateTime(2026, 05, 02, 0, 0, 0, DateTimeKind.Utc) }],
+            nameof(UpsertRecord.Id));
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM Rows;";
+
+        object? count = await command.ExecuteScalarAsync();
+        Assert.AreEqual(2, Convert.ToInt32(count));
+    }
+
+    [TestMethod]
+    public async Task UpsertRowsAsync_WhenSameDatabaseFileIsAccessedConcurrently_ProducesConsistentRows()
+    {
+        string dbPath = CreateDbPath();
+
+        Task[] tasks =
+        [
+            DuckDbStorageHelper.UpsertRowsAsync(
+                dbPath,
+                "BTCUSDT",
+                [CreateKline(1000, 1999, 100), CreateKline(2000, 2999, 200)],
+                nameof(Kline.CloseTime)),
+            DuckDbStorageHelper.UpsertRowsAsync(
+                dbPath,
+                "ETHUSDT",
+                [CreateKline(3000, 3999, 300), CreateKline(4000, 4999, 400)],
+                nameof(Kline.CloseTime))
+        ];
+
+        await Task.WhenAll(tasks);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+
+        using DuckDBCommand btcCommand = connection.CreateCommand();
+        btcCommand.CommandText = "SELECT COUNT(*) FROM BTCUSDT;";
+        using DuckDBCommand ethCommand = connection.CreateCommand();
+        ethCommand.CommandText = "SELECT COUNT(*) FROM ETHUSDT;";
+
+        Assert.AreEqual(2, Convert.ToInt32(await btcCommand.ExecuteScalarAsync()));
+        Assert.AreEqual(2, Convert.ToInt32(await ethCommand.ExecuteScalarAsync()));
+    }
+
+    [TestMethod]
+    public async Task UpsertRowsAsync_WhenSameTableIsUpsertedConcurrentlyWithDisjointKeys_PreservesAllRows()
+    {
+        string dbPath = CreateDbPath();
+
+        Task firstTask = Task.Run(() => DuckDbStorageHelper.UpsertRowsAsync(
+            dbPath,
+            "BTCUSDT",
+            CreateKlines(0, 20, 100),
+            nameof(Kline.CloseTime)));
+        Task secondTask = Task.Run(() => DuckDbStorageHelper.UpsertRowsAsync(
+            dbPath,
+            "BTCUSDT",
+            CreateKlines(20, 20, 200),
+            nameof(Kline.CloseTime)));
+
+        await Task.WhenAll(firstTask, secondTask);
+
+        List<long> closeTimes = await ReadKlineCloseTimesAsync(dbPath, "BTCUSDT");
+
+        Assert.HasCount(40, closeTimes);
+        CollectionAssert.AreEqual(Enumerable.Range(0, 40).Select(index => 1_999L + (index * 1_000L)).ToList(), closeTimes);
+    }
+
+    [TestMethod]
+    public async Task UpsertRowsAsync_WhenSameDatabaseIsWrittenConcurrentlyAcrossMultipleRounds_RemainsConsistent()
+    {
+        string dbPath = CreateDbPath();
+
+        for (int round = 0; round < 8; round++)
+        {
+            Task[] tasks =
+            [
+                Task.Run(() => DuckDbStorageHelper.UpsertRowsAsync(
+                    dbPath,
+                    "BTCUSDT",
+                    CreateKlines(round * 100, 12, 100 + round),
+                    nameof(Kline.CloseTime))),
+                Task.Run(() => DuckDbStorageHelper.UpsertRowsAsync(
+                    dbPath,
+                    "ETHUSDT",
+                    CreateKlines((round * 100) + 1_000, 12, 200 + round),
+                    nameof(Kline.CloseTime))),
+                Task.Run(() => DuckDbStorageHelper.UpsertRowsAsync(
+                    dbPath,
+                    "SOLUSDT",
+                    CreateKlines((round * 100) + 2_000, 12, 300 + round),
+                    nameof(Kline.CloseTime)))
+            ];
+
+            await Task.WhenAll(tasks);
+        }
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+
+        foreach (string tableName in new[] { "BTCUSDT", "ETHUSDT", "SOLUSDT" })
+        {
+            using DuckDBCommand countCommand = connection.CreateCommand();
+            countCommand.CommandText = $"SELECT COUNT(*) FROM {tableName};";
+            Assert.AreEqual(96, Convert.ToInt32(await countCommand.ExecuteScalarAsync()));
+        }
+    }
+
+    [TestMethod]
+    public async Task GetMaxInt64Async_WhenReadsAndWritesRunConcurrently_DoesNotReturnOutOfRangeValue()
+    {
+        string dbPath = CreateDbPath();
+        Task writerTask = Task.Run(async () =>
+        {
+            for (int batch = 0; batch < 10; batch++)
+            {
+                await DuckDbStorageHelper.UpsertRowsAsync(
+                    dbPath,
+                    "BTCUSDT",
+                    CreateFundingRates(batch * 10, 10),
+                    nameof(FundingRate.FundingTime));
+            }
+        });
+
+        List<long?> observedValues = [];
+        Task readerTask = Task.Run(async () =>
+        {
+            while (!writerTask.IsCompleted)
+            {
+                observedValues.Add(await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "BTCUSDT", nameof(FundingRate.FundingTime)));
+                await Task.Delay(5);
+            }
+
+            observedValues.Add(await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "BTCUSDT", nameof(FundingRate.FundingTime)));
+        });
+
+        await Task.WhenAll(writerTask, readerTask);
+
+        Assert.IsTrue(observedValues.All(value => value is null or >= 0 and <= 99_000));
+        Assert.AreEqual(99_000L, observedValues[^1]);
+    }
+
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
 
@@ -407,6 +825,41 @@ public sealed class DuckDbStorageHelperTests
             TakerBuyBaseVolume = closePrice * 5,
             TakerBuyQuoteVolume = closePrice * 6
         };
+
+    private static Kline[] CreateKlines(int startIndex, int count, double priceBase)
+        => Enumerable.Range(startIndex, count)
+            .Select(index =>
+            {
+                long openTime = 1_000L + (index * 1_000L);
+                long closeTime = openTime + 999L;
+                return CreateKline(openTime, closeTime, priceBase + index);
+            })
+            .ToArray();
+
+    private static FundingRate[] CreateFundingRates(int startIndex, int count)
+        => Enumerable.Range(startIndex, count)
+            .Select(index => new FundingRate
+            {
+                FundingTime = index * 1_000L,
+                Rate = index / 1000d,
+                MarkPrice = 100_000 + index
+            })
+            .ToArray();
+
+    private static async Task<List<long>> ReadKlineCloseTimesAsync(string dbPath, string tableName)
+    {
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = $"SELECT CloseTime FROM {tableName} ORDER BY CloseTime;";
+        await using var reader = await command.ExecuteReaderAsync();
+
+        List<long> closeTimes = [];
+        while (await reader.ReadAsync())
+            closeTimes.Add(reader.GetInt64(0));
+
+        return closeTimes;
+    }
 
     private sealed class SampleRecord
     {
@@ -434,6 +887,27 @@ public sealed class DuckDbStorageHelperTests
         public required string SymbolInfoId { get; set; }
         public DateTime OccurredAt { get; set; }
         public RecordCategory Category { get; set; }
+    }
+
+    private sealed class QueryLongRecord
+    {
+        public required string Id { get; set; }
+        public long Sequence { get; set; }
+    }
+
+    private sealed class NullableRecord
+    {
+        public required string Id { get; set; }
+        public string? OptionalName { get; set; }
+        public int? OptionalCount { get; set; }
+        public DateTime? OptionalOccurredAt { get; set; }
+        public SampleStatus? OptionalStatus { get; set; }
+    }
+
+    private sealed class EnumCollectionRecord
+    {
+        public required string Id { get; set; }
+        public SampleStatus[] States { get; set; } = [];
     }
 
     private enum SampleStatus

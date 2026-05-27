@@ -2,6 +2,7 @@ using DuckDB.NET.Data;
 using System.Data;
 using System.Data.Common;
 using System.Reflection;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace BinanceDataCollector;
@@ -9,6 +10,8 @@ namespace BinanceDataCollector;
 internal static class DuckDbStorageHelper
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
+    private static readonly ConcurrentDictionary<string, Lazy<DuckDBConnection>> ConnectionCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(StringComparer.OrdinalIgnoreCase);
 
     public static Task ReplaceTableAsync<T>(string dbPath, string tableName, IEnumerable<T> records, CancellationToken ct = default)
         => ReplaceTableAsync(dbPath, tableName, records, null, false, ct);
@@ -21,88 +24,97 @@ internal static class DuckDbStorageHelper
         bool recreateTable,
         CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-
-        List<T> recordList = [.. records];
-        PropertyInfo[] properties = GetPersistedProperties(typeof(T));
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        using DuckDBTransaction transaction = connection.BeginTransaction();
-
-        if (recreateTable)
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
-            using DuckDBCommand dropCommand = connection.CreateCommand();
-            dropCommand.Transaction = transaction;
-            dropCommand.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
-            await dropCommand.ExecuteNonQueryAsync(ct);
-        }
+            ct.ThrowIfCancellationRequested();
 
-        await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+            List<T> recordList = [.. records];
+            PropertyInfo[] properties = GetPersistedProperties(typeof(T));
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBTransaction transaction = connection.BeginTransaction();
 
-        using DuckDBCommand deleteCommand = connection.CreateCommand();
-        deleteCommand.Transaction = transaction;
-        deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)};";
-        await deleteCommand.ExecuteNonQueryAsync(ct);
+            if (recreateTable)
+            {
+                using DuckDBCommand dropCommand = connection.CreateCommand();
+                dropCommand.Transaction = transaction;
+                dropCommand.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
+                await dropCommand.ExecuteNonQueryAsync(ct);
+            }
 
-        await InsertRowsAsync(connection, transaction, tableName, properties, recordList, ct);
-        transaction.Commit();
+            await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+
+            using DuckDBCommand deleteCommand = connection.CreateCommand();
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)};";
+            await deleteCommand.ExecuteNonQueryAsync(ct);
+
+            await InsertRowsAsync(connection, transaction, tableName, properties, recordList, ct);
+            transaction.Commit();
+        });
     }
 
     public static async Task UpsertRowsAsync<T>(string dbPath, string tableName, IEnumerable<T> records, string keyColumn, CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-
-        List<T> recordList = [.. records];
-        if (recordList.Count == 0)
-            return;
-
-        PropertyInfo[] properties = GetPersistedProperties(typeof(T));
-        PropertyInfo keyProperty = properties.FirstOrDefault(property => property.Name == keyColumn)
-            ?? throw new InvalidOperationException($"Key column '{keyColumn}' was not found on type '{typeof(T).FullName}'.");
-
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        using DuckDBTransaction transaction = connection.BeginTransaction();
-
-        await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
-
-        using DuckDBCommand deleteByKeyCommand = connection.CreateCommand();
-        deleteByKeyCommand.Transaction = transaction;
-        deleteByKeyCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(keyColumn)} = ?;";
-        IDbDataParameter deleteKeyParameter = deleteByKeyCommand.CreateParameter();
-        deleteKeyParameter.DbType = MapDbType(keyProperty.PropertyType);
-        deleteByKeyCommand.Parameters.Add(deleteKeyParameter);
-
-        foreach (T record in recordList)
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            deleteKeyParameter.Value = ConvertToDbValue(keyProperty.GetValue(record), keyProperty.PropertyType);
-            await deleteByKeyCommand.ExecuteNonQueryAsync(ct);
-        }
 
-        await InsertRowsAsync(connection, transaction, tableName, properties, recordList, ct);
-        transaction.Commit();
+            List<T> recordList = [.. records];
+            if (recordList.Count == 0)
+                return;
+
+            PropertyInfo[] properties = GetPersistedProperties(typeof(T));
+            PropertyInfo keyProperty = properties.FirstOrDefault(property => property.Name == keyColumn)
+                ?? throw new InvalidOperationException($"Key column '{keyColumn}' was not found on type '{typeof(T).FullName}'.");
+
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBTransaction transaction = connection.BeginTransaction();
+
+            await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+
+            using DuckDBCommand deleteByKeyCommand = connection.CreateCommand();
+            deleteByKeyCommand.Transaction = transaction;
+            deleteByKeyCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(keyColumn)} = ?;";
+            IDbDataParameter deleteKeyParameter = deleteByKeyCommand.CreateParameter();
+            deleteKeyParameter.DbType = MapDbType(keyProperty.PropertyType);
+            deleteByKeyCommand.Parameters.Add(deleteKeyParameter);
+
+            foreach (T record in recordList)
+            {
+                ct.ThrowIfCancellationRequested();
+                deleteKeyParameter.Value = ConvertToDbValue(keyProperty.GetValue(record), keyProperty.PropertyType);
+                await deleteByKeyCommand.ExecuteNonQueryAsync(ct);
+            }
+
+            await InsertRowsAsync(connection, transaction, tableName, properties, recordList, ct);
+            transaction.Commit();
+        });
     }
 
     public static async Task<List<string>> GetStringValuesAsync(string dbPath, string tableName, string columnName, CancellationToken ct = default)
     {
-        if (!File.Exists(dbPath))
-            return [];
-
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        if (!await TableExistsAsync(connection, tableName, ct))
-            return [];
-
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = $"SELECT {QuoteIdentifier(columnName)} FROM {QuoteIdentifier(tableName)} ORDER BY {QuoteIdentifier(columnName)};";
-
-        List<string> values = [];
-        await using DbDataReader reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        return await WithConnectionLockAsync(dbPath, async normalizedPath =>
         {
-            if (!reader.IsDBNull(0))
-                values.Add(reader.GetString(0));
-        }
+            if (!File.Exists(normalizedPath))
+                return [];
 
-        return values;
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            if (!await TableExistsAsync(connection, tableName, ct))
+                return [];
+
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"SELECT {QuoteIdentifier(columnName)} FROM {QuoteIdentifier(tableName)} ORDER BY {QuoteIdentifier(columnName)};";
+
+            List<string> values = [];
+            await using DbDataReader reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (!reader.IsDBNull(0))
+                    values.Add(reader.GetString(0));
+            }
+
+            return values;
+        });
     }
 
     public static async Task<DateTime?> GetMaxDateTimeAsync(
@@ -112,27 +124,30 @@ internal static class DuckDbStorageHelper
         IReadOnlyDictionary<string, object?>? filters = null,
         CancellationToken ct = default)
     {
-        if (!File.Exists(dbPath))
-            return null;
-
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        if (!await TableExistsAsync(connection, tableName, ct))
-            return null;
-
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = BuildMaxDateTimeSql(tableName, columnName, filters);
-        AddFilterParameters(command, filters);
-
-        object? value = await command.ExecuteScalarAsync(ct);
-        if (value is null || value is DBNull)
-            return null;
-
-        return value switch
+        return await WithConnectionLockAsync<DateTime?>(dbPath, async normalizedPath =>
         {
-            DateTime dateTime => dateTime,
-            DateTimeOffset offset => offset.UtcDateTime,
-            _ => Convert.ToDateTime(value)
-        };
+            if (!File.Exists(normalizedPath))
+                return null;
+
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            if (!await TableExistsAsync(connection, tableName, ct))
+                return null;
+
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = BuildMaxDateTimeSql(tableName, columnName, filters);
+            AddFilterParameters(command, filters);
+
+            object? value = await command.ExecuteScalarAsync(ct);
+            if (value is null || value is DBNull)
+                return null;
+
+            return value switch
+            {
+                DateTime dateTime => dateTime,
+                DateTimeOffset offset => offset.UtcDateTime,
+                _ => Convert.ToDateTime(value)
+            };
+        });
     }
 
     public static async Task<long?> GetMaxInt64Async(
@@ -142,80 +157,146 @@ internal static class DuckDbStorageHelper
         IReadOnlyDictionary<string, object?>? filters = null,
         CancellationToken ct = default)
     {
-        if (!File.Exists(dbPath))
-            return null;
+        return await WithConnectionLockAsync<long?>(dbPath, async normalizedPath =>
+        {
+            if (!File.Exists(normalizedPath))
+                return null;
 
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        if (!await TableExistsAsync(connection, tableName, ct))
-            return null;
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            if (!await TableExistsAsync(connection, tableName, ct))
+                return null;
 
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = BuildMaxDateTimeSql(tableName, columnName, filters);
-        AddFilterParameters(command, filters);
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = BuildMaxDateTimeSql(tableName, columnName, filters);
+            AddFilterParameters(command, filters);
 
-        object? value = await command.ExecuteScalarAsync(ct);
-        if (value is null || value is DBNull)
-            return null;
+            object? value = await command.ExecuteScalarAsync(ct);
+            if (value is null || value is DBNull)
+                return null;
 
-        return Convert.ToInt64(value);
+            return Convert.ToInt64(value);
+        });
     }
 
     public static async Task DeleteRowsBeforeAsync(string dbPath, string tableName, string columnName, DateTime threshold, CancellationToken ct = default)
     {
-        if (!File.Exists(dbPath))
-            return;
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            if (!File.Exists(normalizedPath))
+                return;
 
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        if (!await TableExistsAsync(connection, tableName, ct))
-            return;
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            if (!await TableExistsAsync(connection, tableName, ct))
+                return;
 
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(columnName)} < ?;";
-        IDbDataParameter parameter = command.CreateParameter();
-        parameter.DbType = DbType.DateTime;
-        parameter.Value = threshold;
-        command.Parameters.Add(parameter);
-        await command.ExecuteNonQueryAsync(ct);
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(columnName)} < ?;";
+            IDbDataParameter parameter = command.CreateParameter();
+            parameter.DbType = DbType.DateTime;
+            parameter.Value = threshold;
+            command.Parameters.Add(parameter);
+            await command.ExecuteNonQueryAsync(ct);
+        });
     }
 
     public static async Task DeleteRowsBeforeAsync(string dbPath, string tableName, string columnName, long threshold, CancellationToken ct = default)
     {
-        if (!File.Exists(dbPath))
-            return;
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            if (!File.Exists(normalizedPath))
+                return;
 
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        if (!await TableExistsAsync(connection, tableName, ct))
-            return;
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            if (!await TableExistsAsync(connection, tableName, ct))
+                return;
 
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(columnName)} < ?;";
-        IDbDataParameter parameter = command.CreateParameter();
-        parameter.DbType = DbType.Int64;
-        parameter.Value = threshold;
-        command.Parameters.Add(parameter);
-        await command.ExecuteNonQueryAsync(ct);
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(columnName)} < ?;";
+            IDbDataParameter parameter = command.CreateParameter();
+            parameter.DbType = DbType.Int64;
+            parameter.Value = threshold;
+            command.Parameters.Add(parameter);
+            await command.ExecuteNonQueryAsync(ct);
+        });
     }
 
     public static async Task DropTableIfExistsAsync(string dbPath, string tableName, CancellationToken ct = default)
     {
-        if (!File.Exists(dbPath))
-            return;
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            if (!File.Exists(normalizedPath))
+                return;
 
-        using DuckDBConnection connection = OpenConnection(dbPath);
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
-        await command.ExecuteNonQueryAsync(ct);
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
+            await command.ExecuteNonQueryAsync(ct);
+        });
     }
 
-    private static DuckDBConnection OpenConnection(string dbPath)
+    public static void CloseAllConnections()
     {
-        string? directoryPath = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrWhiteSpace(directoryPath))
-            Directory.CreateDirectory(directoryPath);
+        foreach ((string _, Lazy<DuckDBConnection> lazyConnection) in ConnectionCache)
+        {
+            if (!lazyConnection.IsValueCreated)
+                continue;
 
-        DuckDBConnection connection = new($"Data Source={dbPath}");
-        connection.Open();
-        return connection;
+            try
+            {
+                lazyConnection.Value.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        ConnectionCache.Clear();
+        ConnectionLocks.Clear();
+    }
+
+    private static DuckDBConnection GetOpenConnection(string dbPath)
+    {
+        string normalizedPath = Path.GetFullPath(dbPath);
+        return ConnectionCache.GetOrAdd(normalizedPath, static path => new Lazy<DuckDBConnection>(() =>
+        {
+            string? directoryPath = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directoryPath))
+                Directory.CreateDirectory(directoryPath);
+
+            DuckDBConnection connection = new($"Data Source={path}");
+            connection.Open();
+            return connection;
+        }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+    }
+
+    private static async Task WithConnectionLockAsync(string dbPath, Func<string, Task> action)
+    {
+        string normalizedPath = Path.GetFullPath(dbPath);
+        SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            await action(normalizedPath);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static async Task<T> WithConnectionLockAsync<T>(string dbPath, Func<string, Task<T>> action)
+    {
+        string normalizedPath = Path.GetFullPath(dbPath);
+        SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            return await action(normalizedPath);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private static async Task EnsureTableAsync(
@@ -326,7 +407,11 @@ internal static class DuckDbStorageHelper
         if (filters is null || filters.Count == 0)
             return sql + ";";
 
-        string[] predicates = filters.Keys.Select(key => $"{QuoteIdentifier(key)} = ?").ToArray();
+        string[] predicates = filters
+            .Select(filter => filter.Value is null
+                ? $"{QuoteIdentifier(filter.Key)} IS NULL"
+                : $"{QuoteIdentifier(filter.Key)} = ?")
+            .ToArray();
         return $"{sql} WHERE {string.Join(" AND ", predicates)};";
     }
 
@@ -335,13 +420,14 @@ internal static class DuckDbStorageHelper
         if (filters is null || filters.Count == 0)
             return;
 
-        int index = 0;
         foreach ((string key, object? value) in filters)
         {
+            if (value is null)
+                continue;
+
             IDbDataParameter parameter = command.CreateParameter();
             parameter.Value = ConvertToDbValue(value, value?.GetType() ?? typeof(string));
             command.Parameters.Add(parameter);
-            index++;
         }
     }
 
