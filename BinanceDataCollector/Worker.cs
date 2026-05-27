@@ -78,9 +78,7 @@ public class HangfireJob
             logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
             productionLine.ResetEvent();
 
-            Task duckDbArchiveTask = PackageDuckDbArchiveAsync(ct);
-            Task marketDataArchiveTask = PackageMarketDataArchiveAsync(ct);
-            await Task.WhenAll(duckDbArchiveTask, marketDataArchiveTask);
+            await PackageDuckDbArchiveAsync(ct);
         }
         finally
         {
@@ -95,13 +93,5 @@ public class HangfireJob
         bool packaged = await DuckDbStorageArchiveHelper.FinalizeArchiveAsync(logger, ct);
         if (packaged)
             logger.LogInformation("Finish packaging DuckDB archive at: {time}", DateTimeOffset.Now);
-    }
-
-    private async Task PackageMarketDataArchiveAsync(CancellationToken ct)
-    {
-        logger.LogInformation("Start packaging market data archive at: {time}", DateTimeOffset.Now);
-        bool packaged = await MarketDataArchiveHelper.FinalizeArchiveAsync(logger, ct);
-        if (packaged)
-            logger.LogInformation("Finish packaging market data archive at: {time}", DateTimeOffset.Now);
     }
 }

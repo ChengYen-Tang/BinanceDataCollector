@@ -7,8 +7,8 @@ internal sealed class CoinFutures : BaseMarketData
 
     public override Task<Result<MarketDataDownloadBatch>> DownloadAggTradesAsync(
         string symbol,
-        (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState,
+        DateTime downloadStartTime,
         string tempSymbolPath,
         CancellationToken ct = default)
-        => DownloadAsync(AggTradesDataType, symbol, syncState, tempSymbolPath, ct);
+        => DownloadAsync(AggTradesDataType, symbol, downloadStartTime, tempSymbolPath, ct);
 }

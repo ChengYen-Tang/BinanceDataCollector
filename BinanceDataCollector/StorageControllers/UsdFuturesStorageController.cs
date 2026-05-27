@@ -31,8 +31,6 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market + ".duckdb"); } }
     protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market + ".duckdb"); } }
     protected override bool IsFutures => true;
-    private static IReadOnlyCollection<string> MarketDataTypes => [MarketDataBase.AggTradesDataType];
-
     protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
 
@@ -55,7 +53,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
             GlobalLongShortAccountRatioPath,
             TakerLongShortRatioPath,
         ], delistedSymbols, ct);
-        await DeleteMarketDataSymbolDirectoriesAsync(delistedSymbols, MarketDataTypes, ct);
+        await DeleteAggTradesStorageAsync(delistedSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -112,8 +110,8 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
         }).ToList());
     }
 
-    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, (DateTime DownloadStartTime, DateTime? MonthlyLatestPeriodStart, DateTime? DailyLatestPeriodStart) syncState, CancellationToken ct = default)
-        => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, syncState, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+    protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
+        => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
 
     protected override async Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
