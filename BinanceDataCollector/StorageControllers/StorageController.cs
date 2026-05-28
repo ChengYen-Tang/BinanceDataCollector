@@ -26,6 +26,7 @@ internal abstract class StorageController<T>
     protected static string RootMarkPriceKlinePath = Path.Combine(DataPath, "MarkPriceKline");
     protected static string RootFundingRatePath = Path.Combine(DataPath, "FundingRate");
     protected static string RootOpenInterestPath = Path.Combine(DataPath, "OpenInterestHistory");
+    protected static string RootBookDepthPath = Path.Combine(DataPath, BaseMarketData.BookDepthDataType);
     protected static string RootTopLongShortPositionRatioPath = Path.Combine(DataPath, "TopLongShortPositionRatio");
     protected static string RootTopLongShortAccountRatioPath = Path.Combine(DataPath, "TopLongShortAccountRatio");
     protected static string RootGlobalLongShortAccountRatioPath = Path.Combine(DataPath, "GlobalLongShortAccountRatio");
@@ -299,6 +300,27 @@ internal abstract class StorageController<T>
         return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertAggTradesAsync, result.Value, ct);
     }
 
+    public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateBookDepthAsync(
+        T symbol,
+        DateTime downloadStartTime,
+        CancellationToken ct = default)
+    {
+        logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}",
+            BaseMarketData.BookDepthDataType, symbol, downloadStartTime);
+        Result<MarketDataDownloadBatch> result = await GetBookDepthAsync(symbol, downloadStartTime, ct);
+        logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}",
+            BaseMarketData.BookDepthDataType, symbol, downloadStartTime);
+        if (result.IsFailed)
+        {
+            LogSyncFailure(BaseMarketData.BookDepthDataType, symbol, result.Errors[0].Message, startTime: downloadStartTime);
+            if (result.Errors[0].Message != "Invalid symbol.")
+                await Task.Delay(30 * 60 * 1000, ct);
+            return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertBookDepthAsync, null, ct);
+        }
+
+        return new AsyncWorkItem<MarketDataDownloadBatch?>(InsertBookDepthAsync, result.Value, ct);
+    }
+
     protected void LogSyncFailure(string dataType, T symbol, string message, KlineInterval? interval = null, DateTime? startTime = null)
         => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
             dataType, symbol, interval, startTime, message);
@@ -498,7 +520,7 @@ internal abstract class StorageController<T>
         using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
         EnsureAggTradesTable(connection, batch.Symbol);
 
-        MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetAggTradesDownloadFileSortKey)];
+        MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
         foreach (MarketDataDownloadFile file in sortedFiles)
         {
             string extractionDirectory = file.TempZipPath + ".__extract";
@@ -509,7 +531,7 @@ internal abstract class StorageController<T>
             try
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                foreach (string csvPath in extractedCsvPaths.OrderBy(GetAggTradesCsvSortKey))
+                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
                     ReplaceAggTradesTailFromCsv(connection, batch.Symbol, csvPath);
 
                 ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
@@ -539,6 +561,62 @@ internal abstract class StorageController<T>
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
     }
 
+    protected virtual async Task InsertBookDepthAsync(MarketDataDownloadBatch? batch, CancellationToken ct = default)
+    {
+        if (batch is null || batch.Files.Count == 0)
+            return;
+        ct.ThrowIfCancellationRequested();
+
+        string databasePath = GetBookDepthDatabasePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+
+        logger.LogDebug("Start persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
+            batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
+
+        using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
+        EnsureBookDepthTable(connection, batch.Symbol);
+
+        MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
+        foreach (MarketDataDownloadFile file in sortedFiles)
+        {
+            string extractionDirectory = file.TempZipPath + ".__extract";
+
+            if (Directory.Exists(extractionDirectory))
+                Directory.Delete(extractionDirectory, true);
+            Directory.CreateDirectory(extractionDirectory);
+            try
+            {
+                string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
+                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                    ReplaceBookDepthTailFromCsv(connection, batch.Symbol, csvPath);
+
+                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+                DeleteFileIfExists(file.TempZipPath);
+                DeleteFileIfExists(file.TempChecksumPath);
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
+                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath)!);
+            }
+            catch (OperationCanceledException)
+            {
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
+                logger.LogError(ex,
+                    "Persist bookDepth archive failed. Market: {Market}, Symbol: {Symbol}, Period: {Period}, FileName: {FileName}",
+                    batch.MarketPathSegment, batch.Symbol, file.Period, file.FileName);
+            }
+        }
+
+        logger.LogDebug("Finish persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
+            batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
+    }
+
     public virtual async Task<DateTime> GetLastAggTradesAsync(T symbol, CancellationToken ct = default)
     {
         string symbolName = GetSymbolName(symbol);
@@ -549,6 +627,17 @@ internal abstract class StorageController<T>
             return yearsReserved;
 
         DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "transact_time", null, ct);
+        return latest ?? yearsReserved;
+    }
+
+    public virtual async Task<DateTime> GetLastBookDepthAsync(T symbol, CancellationToken ct = default)
+    {
+        string symbolName = GetSymbolName(symbol);
+        string databasePath = GetBookDepthDatabasePath();
+        if (!File.Exists(databasePath))
+            return yearsReserved;
+
+        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "snapshot_time", null, ct);
         return latest ?? yearsReserved;
     }
 
@@ -607,6 +696,10 @@ internal abstract class StorageController<T>
     protected abstract Task<Result<List<T>>> GetMarketAsync(CancellationToken ct = default);
 
     protected abstract Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(
+        T symbol,
+        DateTime downloadStartTime,
+        CancellationToken ct = default);
+    protected abstract Task<Result<MarketDataDownloadBatch>> GetBookDepthAsync(
         T symbol,
         DateTime downloadStartTime,
         CancellationToken ct = default);
@@ -675,6 +768,26 @@ internal abstract class StorageController<T>
         }
     }
 
+    protected Task DeleteOldBookDepthDataAsync(string symbolName, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        string databasePath = GetBookDepthDatabasePath();
+        if (!File.Exists(databasePath))
+            return Task.CompletedTask;
+
+        return DeleteOldBookDepthRowsAsync(databasePath, symbolName, ct);
+    }
+
+    protected async Task DeleteBookDepthStorageAsync(IReadOnlyCollection<string> symbols, CancellationToken ct = default)
+    {
+        foreach (string symbol in symbols)
+        {
+            ct.ThrowIfCancellationRequested();
+            await DuckDbStorageHelper.DropTableIfExistsAsync(GetBookDepthDatabasePath(), symbol, ct);
+        }
+    }
+
     private async Task EnsureAggTradesStorageMigratedAsync(string symbolName, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -702,7 +815,7 @@ internal abstract class StorageController<T>
         {
             string[] csvPaths = Directory
                 .EnumerateFiles(legacySymbolPath, "*.csv", SearchOption.AllDirectories)
-                .OrderBy(GetAggTradesCsvSortKey)
+                .OrderBy(GetMarketDataCsvSortKey)
                 .ToArray();
 
             if (csvPaths.Length == 0)
@@ -747,6 +860,9 @@ internal abstract class StorageController<T>
     private string GetAggTradesDatabasePath()
         => Path.Combine(DataPath, BaseMarketData.AggTradesDataType, $"{MarketPathSegment}.duckdb");
 
+    private string GetBookDepthDatabasePath()
+        => Path.Combine(DataPath, BaseMarketData.BookDepthDataType, $"{MarketPathSegment}.duckdb");
+
     private string GetLegacyAggTradesSymbolPath(string symbol)
         => GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbol);
 
@@ -767,6 +883,16 @@ internal abstract class StorageController<T>
                 last_trade_id BIGINT,
                 transact_time TIMESTAMP,
                 is_buyer_maker BOOLEAN
+            );
+            """);
+
+    private static void EnsureBookDepthTable(DuckDBConnection connection, string tableName)
+        => ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
+                snapshot_time TIMESTAMP,
+                percentage DECIMAL(10,2),
+                depth DOUBLE,
+                notional DOUBLE
             );
             """);
 
@@ -829,6 +955,49 @@ internal abstract class StorageController<T>
         DropAggTradesStagingTables(connection);
     }
 
+    private static void ReplaceBookDepthTailFromCsv(DuckDBConnection connection, string tableName, string csvPath)
+    {
+        BuildBookDepthStagingTable(connection, csvPath);
+
+        DateTime? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(snapshot_time) FROM staging_book_depth_deduped;") switch
+        {
+            null => null,
+            DBNull => null,
+            object value => Convert.ToDateTime(value)
+        };
+
+        if (!replaceFrom.HasValue)
+        {
+            DropBookDepthStagingTables(connection);
+            return;
+        }
+
+        using DuckDBTransaction transaction = connection.BeginTransaction();
+
+        using (DuckDBCommand deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE snapshot_time >= $replace_from;";
+            deleteCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom.Value));
+            deleteCommand.ExecuteNonQuery();
+        }
+
+        using (DuckDBCommand insertCommand = connection.CreateCommand())
+        {
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = $"""
+                INSERT INTO {QuoteIdentifier(tableName)}
+                SELECT snapshot_time, percentage, depth, notional
+                FROM staging_book_depth_deduped
+                ORDER BY snapshot_time, percentage;
+                """;
+            insertCommand.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        DropBookDepthStagingTables(connection);
+    }
+
     private static void BuildAggTradesStagingTable(DuckDBConnection connection, string csvPath)
     {
         DropAggTradesStagingTables(connection);
@@ -866,10 +1035,47 @@ internal abstract class StorageController<T>
             """);
     }
 
+    private static void BuildBookDepthStagingTable(DuckDBConnection connection, string csvPath)
+    {
+        DropBookDepthStagingTables(connection);
+
+        string csvLiteral = ToSqlStringLiteral(csvPath);
+        ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TEMP TABLE staging_book_depth AS
+            SELECT
+                CAST("timestamp" AS TIMESTAMP) AS snapshot_time,
+                CAST(percentage AS DECIMAL(10,2)) AS percentage,
+                CAST(depth AS DOUBLE) AS depth,
+                CAST(notional AS DOUBLE) AS notional
+            FROM read_csv({csvLiteral}, header = true, all_varchar = true);
+            """);
+
+        ExecuteDuckDbNonQuery(connection, """
+            CREATE TEMP TABLE staging_book_depth_deduped AS
+            SELECT snapshot_time, percentage, depth, notional
+            FROM (
+                SELECT
+                    snapshot_time,
+                    percentage,
+                    depth,
+                    notional,
+                    ROW_NUMBER() OVER (PARTITION BY snapshot_time, percentage ORDER BY snapshot_time DESC, percentage DESC) AS row_num
+                FROM staging_book_depth
+            )
+            WHERE row_num = 1;
+            """);
+    }
+
     private static void DropAggTradesStagingTables(DuckDBConnection connection)
         => ExecuteDuckDbNonQuery(connection, """
             DROP TABLE IF EXISTS staging_agg_trades_deduped;
             DROP TABLE IF EXISTS staging_agg_trades;
+            """);
+
+    private static void DropBookDepthStagingTables(DuckDBConnection connection)
+        => ExecuteDuckDbNonQuery(connection, """
+            DROP TABLE IF EXISTS staging_book_depth_deduped;
+            DROP TABLE IF EXISTS staging_book_depth;
             """);
 
     private static object? ExecuteDuckDbScalar(DuckDBConnection connection, string commandText)
@@ -911,7 +1117,7 @@ internal abstract class StorageController<T>
         return [.. extractedPaths];
     }
 
-    private static DateTime GetAggTradesDownloadFileSortKey(MarketDataDownloadFile file)
+    private static DateTime GetMarketDataDownloadFileSortKey(MarketDataDownloadFile file)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(file.FileName);
         string prefix = $"{file.Symbol}-{file.DataType}-";
@@ -926,7 +1132,7 @@ internal abstract class StorageController<T>
         return DateTime.MaxValue;
     }
 
-    private static DateTime GetAggTradesCsvSortKey(string csvPath)
+    private static DateTime GetMarketDataCsvSortKey(string csvPath)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(csvPath);
         int separatorIndex = fileNameWithoutExtension.LastIndexOf('-');
@@ -948,6 +1154,14 @@ internal abstract class StorageController<T>
     {
         await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "transact_time", yearsReserved, ct);
         DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, tableName, "transact_time", null, ct);
+        if (!latest.HasValue)
+            await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
+    }
+
+    private async Task DeleteOldBookDepthRowsAsync(string databasePath, string tableName, CancellationToken ct)
+    {
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "snapshot_time", yearsReserved, ct);
+        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, tableName, "snapshot_time", null, ct);
         if (!latest.HasValue)
             await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
     }

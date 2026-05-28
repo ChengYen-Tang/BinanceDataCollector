@@ -54,6 +54,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             TakerLongShortRatioPath,
         ], delistedSymbols, ct);
         await DeleteAggTradesStorageAsync(delistedSymbols, ct);
+        await DeleteBookDepthStorageAsync(delistedSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -74,6 +75,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             await DeleteSymbolRowsBeforeAsync(GlobalLongShortAccountRatioPath, symbolName, nameof(LongShortRatioCsv.Timestamp), ct);
             await DeleteSymbolRowsBeforeAsync(TakerLongShortRatioPath, symbolName, nameof(TakerLongShortRatioCsv.Timestamp), ct);
             await DeleteOldAggTradesDataAsync(symbolName, ct);
+            await DeleteOldBookDepthDataAsync(symbolName, ct);
         }
     }
 
@@ -112,6 +114,9 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
         => coinFuturesMarketData.DownloadAggTradesAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+
+    protected override Task<Result<MarketDataDownloadBatch>> GetBookDepthAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
+        => coinFuturesMarketData.DownloadBookDepthAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.BookDepthDataType, symbol.Name), ct);
 
     public override Task<DateTime> GetLastFundingTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
         => GetLastTimestampAsync(FundingRatePath, symbol.Name, nameof(FundingRate.FundingTime), null, ct);

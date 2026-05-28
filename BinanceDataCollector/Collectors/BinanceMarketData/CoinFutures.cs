@@ -11,4 +11,11 @@ internal sealed class CoinFutures : BaseMarketData
         string tempSymbolPath,
         CancellationToken ct = default)
         => DownloadAsync(AggTradesDataType, symbol, downloadStartTime, tempSymbolPath, ct);
+
+    public override Task<Result<MarketDataDownloadBatch>> DownloadBookDepthAsync(
+        string symbol,
+        DateTime downloadStartTime,
+        string tempSymbolPath,
+        CancellationToken ct = default)
+        => DownloadAsync(BookDepthDataType, symbol, downloadStartTime, tempSymbolPath, ct);
 }

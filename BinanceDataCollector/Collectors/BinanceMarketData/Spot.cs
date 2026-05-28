@@ -11,4 +11,11 @@ internal sealed class Spot : BaseMarketData
         string tempSymbolPath,
         CancellationToken ct = default)
         => DownloadAsync(AggTradesDataType, symbol, downloadStartTime, tempSymbolPath, ct);
+
+    public override Task<Result<MarketDataDownloadBatch>> DownloadBookDepthAsync(
+        string symbol,
+        DateTime downloadStartTime,
+        string tempSymbolPath,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Spot market does not support book depth market data.");
 }

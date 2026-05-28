@@ -54,6 +54,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
             TakerLongShortRatioPath,
         ], delistedSymbols, ct);
         await DeleteAggTradesStorageAsync(delistedSymbols, ct);
+        await DeleteBookDepthStorageAsync(delistedSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
@@ -74,6 +75,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
             await DeleteSymbolRowsBeforeAsync(GlobalLongShortAccountRatioPath, symbolName, nameof(LongShortRatioCsv.Timestamp), ct);
             await DeleteSymbolRowsBeforeAsync(TakerLongShortRatioPath, symbolName, nameof(TakerLongShortRatioCsv.Timestamp), ct);
             await DeleteOldAggTradesDataAsync(symbolName, ct);
+            await DeleteOldBookDepthDataAsync(symbolName, ct);
         }
     }
 
@@ -112,6 +114,9 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
         => usdFuturesMarketData.DownloadAggTradesAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.AggTradesDataType, symbol.Name), ct);
+
+    protected override Task<Result<MarketDataDownloadBatch>> GetBookDepthAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
+        => usdFuturesMarketData.DownloadBookDepthAsync(symbol.Name, downloadStartTime, GetMarketDataTempSymbolPath(MarketDataBase.BookDepthDataType, symbol.Name), ct);
 
     protected override async Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {

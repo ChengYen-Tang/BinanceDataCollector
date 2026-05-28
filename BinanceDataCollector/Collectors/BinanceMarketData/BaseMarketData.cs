@@ -10,6 +10,7 @@ internal abstract class BaseMarketData
     private const string BucketListingBaseUrl = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision";
     private static readonly XNamespace S3Namespace = "http://s3.amazonaws.com/doc/2006-03-01/";
     public const string AggTradesDataType = "aggTrades";
+    public const string BookDepthDataType = "bookDepth";
     protected static readonly HttpClient client = new()
     {
         BaseAddress = new Uri("https://data.binance.vision/"),
@@ -19,6 +20,11 @@ internal abstract class BaseMarketData
     protected abstract string MarketPathSegment { get; }
     protected abstract string MarketDataRemotePathSegment { get; }
     public abstract Task<Result<MarketDataDownloadBatch>> DownloadAggTradesAsync(
+        string symbol,
+        DateTime downloadStartTime,
+        string tempSymbolPath,
+        CancellationToken ct = default);
+    public abstract Task<Result<MarketDataDownloadBatch>> DownloadBookDepthAsync(
         string symbol,
         DateTime downloadStartTime,
         string tempSymbolPath,

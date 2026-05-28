@@ -54,6 +54,12 @@ internal abstract class CollectorController<T> : ICollectorController
             await productionLine.GatherChannel.Writer.WriteAsync(aggTradesWorkItem, ct);
         if (!IsFutures)
             return;
+        DateTime bookDepthStartTime = await storageController.GetLastBookDepthAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> bookDepthWorkItem
+            = new(GatherBookDepthAsync, symbol, bookDepthStartTime, ct, BuildWorkItemDescription("BookDepth", symbol, startTime: bookDepthStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(bookDepthWorkItem, ct);
+
         DateTime premiumIndexStartTime = await storageController.GetLastPremiumIndexTimeAsync(symbol, interval, ct);
         AsyncWorkItem<T, KlineInterval, DateTime> premiumIndexWorkItem = new(GatherPremiumIndexKlinesAsync, symbol, interval, premiumIndexStartTime, ct, BuildWorkItemDescription("PremiumIndexKlines", symbol, interval, premiumIndexStartTime));
         if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
@@ -115,6 +121,13 @@ internal abstract class CollectorController<T> : ICollectorController
     private async Task GatherAggTradesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
     {
         AsyncWorkItem<BinanceMarketData.MarketDataDownloadBatch?> workItem = await storageController.UpdateAggTradesAsync(symbol, startTime, ct);
+        if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
+    }
+
+    private async Task GatherBookDepthAsync(T symbol, DateTime startTime, CancellationToken ct = default)
+    {
+        AsyncWorkItem<BinanceMarketData.MarketDataDownloadBatch?> workItem = await storageController.UpdateBookDepthAsync(symbol, startTime, ct);
         if (await productionLine.InsertChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.InsertChannel.Writer.WriteAsync(workItem, ct);
     }
