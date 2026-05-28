@@ -803,6 +803,60 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
+    public async Task ExecuteWithConnectionAsync_WhenSamePathIsUsedConcurrently_ReusesSingleConnectionInstance()
+    {
+        string dbPath = CreateDbPath();
+        ConcurrentDictionary<int, byte> connectionIds = [];
+
+        Task[] tasks = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => DuckDbStorageHelper.ExecuteWithConnectionAsync(
+                dbPath,
+                async connection =>
+                {
+                    connectionIds.TryAdd(connection.GetHashCode(), 0);
+                    await Task.Delay(10);
+                })))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.AreEqual(1, connectionIds.Count);
+    }
+
+    [TestMethod]
+    public async Task ExecuteWithConnectionAsync_WhenSamePathIsUsedConcurrently_SerializesCallbacks()
+    {
+        string dbPath = CreateDbPath();
+        int concurrentCallbacks = 0;
+        int observedMaxConcurrency = 0;
+
+        Task[] tasks = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => DuckDbStorageHelper.ExecuteWithConnectionAsync(
+                dbPath,
+                async _ =>
+                {
+                    int current = Interlocked.Increment(ref concurrentCallbacks);
+                    int snapshotMax;
+                    do
+                    {
+                        snapshotMax = observedMaxConcurrency;
+                        if (snapshotMax >= current)
+                            break;
+                    }
+                    while (Interlocked.CompareExchange(ref observedMaxConcurrency, current, snapshotMax) != snapshotMax);
+
+                    await Task.Delay(10);
+                    Interlocked.Decrement(ref concurrentCallbacks);
+                })))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.AreEqual(1, observedMaxConcurrency);
+        Assert.AreEqual(0, concurrentCallbacks);
+    }
+
+    [TestMethod]
     public async Task GetMaxInt64Async_WhenReadsAndWritesRunConcurrently_DoesNotReturnOutOfRangeValue()
     {
         string dbPath = CreateDbPath();

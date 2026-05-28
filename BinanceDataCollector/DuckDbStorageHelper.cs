@@ -254,6 +254,26 @@ internal static class DuckDbStorageHelper
         });
     }
 
+    public static Task ExecuteWithConnectionAsync(
+        string dbPath,
+        Func<DuckDBConnection, Task> action)
+    {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
+        return WithConnectionLockAsync(dbPath, normalizedPath => action(GetOpenConnection(normalizedPath)));
+    }
+
+    public static Task<T> ExecuteWithConnectionAsync<T>(
+        string dbPath,
+        Func<DuckDBConnection, Task<T>> action)
+    {
+        // Intentionally do not pass the caller token into the connection gate.
+        // Once a write/delete operation is enqueued, it must wait its turn and
+        // finish consistently rather than abandoning the mutation mid-pipeline.
+        return WithConnectionLockAsync(dbPath, normalizedPath => action(GetOpenConnection(normalizedPath)));
+    }
+
     public static void CloseAllConnections()
     {
         lock (LifecycleSync)

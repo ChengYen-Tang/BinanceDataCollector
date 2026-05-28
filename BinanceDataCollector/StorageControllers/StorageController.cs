@@ -524,9 +524,6 @@ internal abstract class StorageController<T>
         logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
 
-        using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
-        EnsureAggTradesTable(connection, batch.Symbol);
-
         MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
         foreach (MarketDataDownloadFile file in sortedFiles)
         {
@@ -538,13 +535,18 @@ internal abstract class StorageController<T>
             try
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
                 {
-                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
-                    ReplaceAggTradesTailFromCsv(connection, batch.Symbol, csvPath);
-                }
+                    EnsureAggTradesTable(connection, batch.Symbol);
+                    foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                    {
+                        LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
+                        ReplaceAggTradesTailFromCsv(connection, batch.Symbol, csvPath);
+                    }
 
-                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+                    ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+                    return Task.CompletedTask;
+                });
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
                 if (Directory.Exists(extractionDirectory))
@@ -583,9 +585,6 @@ internal abstract class StorageController<T>
         logger.LogDebug("Start persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
 
-        using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
-        EnsureBookDepthTable(connection, batch.Symbol);
-
         MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
         foreach (MarketDataDownloadFile file in sortedFiles)
         {
@@ -597,10 +596,15 @@ internal abstract class StorageController<T>
             try
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
-                    ReplaceBookDepthTailFromCsv(connection, batch.Symbol, csvPath);
+                await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
+                {
+                    EnsureBookDepthTable(connection, batch.Symbol);
+                    foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                        ReplaceBookDepthTailFromCsv(connection, batch.Symbol, csvPath);
 
-                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+                    ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+                    return Task.CompletedTask;
+                });
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
                 if (Directory.Exists(extractionDirectory))
@@ -834,22 +838,8 @@ internal abstract class StorageController<T>
                 return;
             }
 
-            if (File.Exists(databasePath))
+            await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
             {
-                using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
-                EnsureAggTradesTable(connection, symbolName);
-                foreach (string csvPath in csvPaths)
-                {
-                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
-                    AppendAggTradesFromCsv(connection, symbolName, csvPath);
-                }
-                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
-            }
-            else
-            {
-                string stagingDatabasePath = databasePath + ".__staging";
-                DeleteFileIfExists(stagingDatabasePath);
-                using DuckDBConnection connection = OpenDuckDbConnection(stagingDatabasePath);
                 EnsureAggTradesTable(connection, symbolName);
                 foreach (string csvPath in csvPaths)
                 {
@@ -858,9 +848,8 @@ internal abstract class StorageController<T>
                 }
 
                 ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
-                connection.Close();
-                File.Move(stagingDatabasePath, databasePath);
-            }
+                return Task.CompletedTask;
+            });
 
             Directory.Delete(legacySymbolPath, true);
             logger.LogInformation("Finish migrating aggTrades legacy storage. Market: {Market}, Symbol: {Symbol}, ImportedFiles: {ImportedFiles}",
@@ -868,7 +857,6 @@ internal abstract class StorageController<T>
         }
         catch
         {
-            DeleteFileIfExists(databasePath + ".__staging");
             throw;
         }
     }
@@ -881,13 +869,6 @@ internal abstract class StorageController<T>
 
     private string GetLegacyAggTradesSymbolPath(string symbol)
         => GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbol);
-
-    private static DuckDBConnection OpenDuckDbConnection(string databasePath)
-    {
-        DuckDBConnection connection = new($"Data Source={databasePath}");
-        connection.Open();
-        return connection;
-    }
 
     private static void EnsureAggTradesTable(DuckDBConnection connection, string tableName)
         => ExecuteDuckDbNonQuery(connection, $"""
