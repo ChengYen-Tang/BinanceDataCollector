@@ -1,20 +1,30 @@
+using CollectorModels.Models.Storage;
 using DuckDB.NET.Data;
 using System.Data;
 using System.Data.Common;
 using System.Reflection;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.ObjectPool;
 
 namespace BinanceDataCollector;
 
 internal static class DuckDbStorageHelper
 {
+    private const int MarketDataImportBatchSize = 10_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
+    private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     private static readonly ConcurrentDictionary<string, DuckDBConnection> ConnectionCache = new(PathComparer);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(PathComparer);
     private static readonly object LifecycleSync = new();
     private static readonly ManualResetEventSlim NoActiveOperations = new(initialState: true);
+    private static readonly DefaultObjectPoolProvider PoolProvider = new();
+    private static readonly ObjectPool<List<AggTradeImportRow>> AggTradeBatchPool = PoolProvider.Create(new PooledListPolicy<AggTradeImportRow>(MarketDataImportBatchSize));
+    private static readonly ObjectPool<Dictionary<long, AggTradeImportRow>> AggTradeDedupPool = PoolProvider.Create(new PooledDictionaryPolicy<long, AggTradeImportRow>(MarketDataImportBatchSize));
+    private static readonly ObjectPool<List<BookDepthImportRow>> BookDepthBatchPool = PoolProvider.Create(new PooledListPolicy<BookDepthImportRow>(MarketDataImportBatchSize));
+    private static readonly ObjectPool<Dictionary<BookDepthRowKey, BookDepthImportRow>> BookDepthDedupPool = PoolProvider.Create(new PooledDictionaryPolicy<BookDepthRowKey, BookDepthImportRow>(MarketDataImportBatchSize));
     private static int activeOperations;
     private static bool isClosing;
 
@@ -274,6 +284,95 @@ internal static class DuckDbStorageHelper
         return WithConnectionLockAsync(dbPath, normalizedPath => action(GetOpenConnection(normalizedPath)));
     }
 
+    public static async Task ReplaceAggTradesTailFromCsvAsync(
+        string dbPath,
+        string tableName,
+        string csvPath,
+        bool sourceIsMicroseconds,
+        CancellationToken ct = default)
+    {
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            EnsureAggTradesTable(connection, tableName);
+            ImportAggTradesCsv(connection, tableName, csvPath, sourceIsMicroseconds, replaceTail: true);
+            await Task.CompletedTask;
+        });
+    }
+
+    public static async Task AppendAggTradesFromCsvAsync(
+        string dbPath,
+        string tableName,
+        string csvPath,
+        bool sourceIsMicroseconds,
+        CancellationToken ct = default)
+    {
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            EnsureAggTradesTable(connection, tableName);
+            ImportAggTradesCsv(connection, tableName, csvPath, sourceIsMicroseconds, replaceTail: false);
+            await Task.CompletedTask;
+        });
+    }
+
+    public static async Task ReplaceBookDepthTailFromCsvAsync(
+        string dbPath,
+        string tableName,
+        string csvPath,
+        CancellationToken ct = default)
+    {
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            EnsureBookDepthTable(connection, tableName);
+            ImportBookDepthCsv(connection, tableName, csvPath);
+            await Task.CompletedTask;
+        });
+    }
+
+    public static async Task CheckpointAsync(string dbPath, CancellationToken ct = default)
+    {
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+            await Task.CompletedTask;
+        });
+    }
+
+    public static async Task NormalizeAggTradesStoredTimeAsync(
+        string dbPath,
+        string tableName,
+        long microsecondsBoundary,
+        CancellationToken ct = default)
+    {
+        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!File.Exists(normalizedPath))
+                return;
+
+            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            if (!TableExists(connection, tableName))
+                return;
+
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"""
+                UPDATE {QuoteIdentifier(tableName)}
+                SET transact_time = transact_time * 1000
+                WHERE transact_time < $microseconds_boundary;
+                """;
+            command.Parameters.Add(new DuckDBParameter("microseconds_boundary", microsecondsBoundary));
+            command.ExecuteNonQuery();
+            await Task.CompletedTask;
+        });
+    }
+
     public static void CloseAllConnections()
     {
         lock (LifecycleSync)
@@ -439,6 +538,485 @@ internal static class DuckDbStorageHelper
         }
     }
 
+    private static void EnsureAggTradesTable(DuckDBConnection connection, string tableName)
+        => ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
+                parquetagg_trade_id BIGINT,
+                price DOUBLE,
+                quantity DOUBLE,
+                first_trade_id BIGINT,
+                last_trade_id BIGINT,
+                transact_time BIGINT,
+                is_buyer_maker BOOLEAN
+            );
+            """);
+
+    private static void EnsureBookDepthTable(DuckDBConnection connection, string tableName)
+        => ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
+                snapshot_time BIGINT,
+                percentage DECIMAL(10,2),
+                depth DOUBLE,
+                notional DOUBLE
+            );
+            """);
+
+    private static void ImportAggTradesCsv(
+        DuckDBConnection connection,
+        string tableName,
+        string csvPath,
+        bool sourceIsMicroseconds,
+        bool replaceTail)
+    {
+        EnsureAggTradesBatchTables(connection);
+        List<AggTradeImportRow> batchRows = AggTradeBatchPool.Get();
+        Dictionary<long, AggTradeImportRow> batchDedup = AggTradeDedupPool.Get();
+        bool tailDeleted = !replaceTail;
+        long replaceFrom = replaceTail
+            ? GetAggTradesCsvMinTimestamp(csvPath, sourceIsMicroseconds)
+            : 0;
+
+        try
+        {
+            using StreamReader reader = new(csvPath);
+            while (reader.ReadLine() is { } line)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                AggTradeImportRow row = ParseAggTrade(line.AsSpan(), sourceIsMicroseconds);
+                batchDedup[row.ParquetAggTradeId] = row;
+                if (batchDedup.Count >= MarketDataImportBatchSize)
+                    FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+            }
+
+            FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+        }
+        finally
+        {
+            batchRows.Clear();
+            AggTradeBatchPool.Return(batchRows);
+            batchDedup.Clear();
+            AggTradeDedupPool.Return(batchDedup);
+        }
+    }
+
+    private static void ImportBookDepthCsv(DuckDBConnection connection, string tableName, string csvPath)
+    {
+        EnsureBookDepthBatchTables(connection);
+        List<BookDepthImportRow> batchRows = BookDepthBatchPool.Get();
+        Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup = BookDepthDedupPool.Get();
+        bool tailDeleted = false;
+        long replaceFrom = GetBookDepthCsvMinTimestamp(csvPath);
+
+        try
+        {
+            using StreamReader reader = new(csvPath);
+            bool isFirstLine = true;
+            while (reader.ReadLine() is { } line)
+            {
+                if (isFirstLine)
+                {
+                    isFirstLine = false;
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                BookDepthImportRow row = ParseBookDepth(line.AsSpan());
+                batchDedup[new BookDepthRowKey(row.SnapshotTime, row.Percentage)] = row;
+                if (batchDedup.Count >= MarketDataImportBatchSize)
+                    FlushBookDepthBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+            }
+
+            FlushBookDepthBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+        }
+        finally
+        {
+            batchRows.Clear();
+            BookDepthBatchPool.Return(batchRows);
+            batchDedup.Clear();
+            BookDepthDedupPool.Return(batchDedup);
+        }
+    }
+
+    private static void FlushAggTradeBatch(
+        DuckDBConnection connection,
+        string tableName,
+        List<AggTradeImportRow> batchRows,
+        Dictionary<long, AggTradeImportRow> batchDedup,
+        ref bool tailDeleted,
+        long replaceFrom)
+    {
+        if (batchDedup.Count == 0)
+            return;
+
+        batchRows.Clear();
+        batchRows.AddRange(batchDedup.Values);
+        batchRows.Sort(static (x, y) =>
+        {
+            int timeCompare = x.TransactTime.CompareTo(y.TransactTime);
+            return timeCompare != 0 ? timeCompare : x.ParquetAggTradeId.CompareTo(y.ParquetAggTradeId);
+        });
+
+        using DuckDBTransaction transaction = connection.BeginTransaction();
+        if (!tailDeleted)
+        {
+            using DuckDBCommand deleteTailCommand = connection.CreateCommand();
+            deleteTailCommand.Transaction = transaction;
+            deleteTailCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE transact_time >= $replace_from;";
+            deleteTailCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom));
+            deleteTailCommand.ExecuteNonQuery();
+            tailDeleted = true;
+        }
+
+        ClearAggTradesBatchTables(connection, transaction);
+        using (DuckDBCommand insertRowCommand = CreateAggTradesBatchRowInsertCommand(connection, transaction))
+        using (DuckDBCommand insertKeyCommand = CreateAggTradesBatchKeyInsertCommand(connection, transaction))
+        {
+            foreach (AggTradeImportRow row in batchRows)
+            {
+                BindAggTradeRow(insertRowCommand, row);
+                insertRowCommand.ExecuteNonQuery();
+                insertKeyCommand.Parameters[0].Value = row.ParquetAggTradeId;
+                insertKeyCommand.ExecuteNonQuery();
+            }
+        }
+
+        using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
+        {
+            deleteByKeyCommand.Transaction = transaction;
+            deleteByKeyCommand.CommandText = $"""
+                DELETE FROM {QuoteIdentifier(tableName)}
+                USING temp_agg_trades_batch_keys
+                WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = temp_agg_trades_batch_keys.parquetagg_trade_id;
+                """;
+            deleteByKeyCommand.ExecuteNonQuery();
+        }
+
+        using (DuckDBCommand insertCommand = connection.CreateCommand())
+        {
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = $"""
+                INSERT INTO {QuoteIdentifier(tableName)}
+                SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
+                FROM temp_agg_trades_batch_rows
+                ORDER BY transact_time, parquetagg_trade_id;
+                """;
+            insertCommand.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        batchDedup.Clear();
+        batchRows.Clear();
+    }
+
+    private static void FlushBookDepthBatch(
+        DuckDBConnection connection,
+        string tableName,
+        List<BookDepthImportRow> batchRows,
+        Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup,
+        ref bool tailDeleted,
+        long replaceFrom)
+    {
+        if (batchDedup.Count == 0)
+            return;
+
+        batchRows.Clear();
+        batchRows.AddRange(batchDedup.Values);
+        batchRows.Sort(static (x, y) =>
+        {
+            int timeCompare = x.SnapshotTime.CompareTo(y.SnapshotTime);
+            return timeCompare != 0 ? timeCompare : x.Percentage.CompareTo(y.Percentage);
+        });
+
+        using DuckDBTransaction transaction = connection.BeginTransaction();
+        if (!tailDeleted)
+        {
+            using DuckDBCommand deleteTailCommand = connection.CreateCommand();
+            deleteTailCommand.Transaction = transaction;
+            deleteTailCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE snapshot_time >= $replace_from;";
+            deleteTailCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom));
+            deleteTailCommand.ExecuteNonQuery();
+            tailDeleted = true;
+        }
+
+        ClearBookDepthBatchTables(connection, transaction);
+        using (DuckDBCommand insertRowCommand = CreateBookDepthBatchRowInsertCommand(connection, transaction))
+        using (DuckDBCommand insertKeyCommand = CreateBookDepthBatchKeyInsertCommand(connection, transaction))
+        {
+            foreach (BookDepthImportRow row in batchRows)
+            {
+                BindBookDepthRow(insertRowCommand, row);
+                insertRowCommand.ExecuteNonQuery();
+                insertKeyCommand.Parameters[0].Value = row.SnapshotTime;
+                insertKeyCommand.Parameters[1].Value = row.Percentage;
+                insertKeyCommand.ExecuteNonQuery();
+            }
+        }
+
+        using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
+        {
+            deleteByKeyCommand.Transaction = transaction;
+            deleteByKeyCommand.CommandText = $"""
+                DELETE FROM {QuoteIdentifier(tableName)}
+                USING temp_book_depth_batch_keys
+                WHERE {QuoteIdentifier(tableName)}.snapshot_time = temp_book_depth_batch_keys.snapshot_time
+                  AND {QuoteIdentifier(tableName)}.percentage = temp_book_depth_batch_keys.percentage;
+                """;
+            deleteByKeyCommand.ExecuteNonQuery();
+        }
+
+        using (DuckDBCommand insertCommand = connection.CreateCommand())
+        {
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = $"""
+                INSERT INTO {QuoteIdentifier(tableName)}
+                SELECT snapshot_time, percentage, depth, notional
+                FROM temp_book_depth_batch_rows
+                ORDER BY snapshot_time, percentage;
+                """;
+            insertCommand.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        batchDedup.Clear();
+        batchRows.Clear();
+    }
+
+    private static void EnsureAggTradesBatchTables(DuckDBConnection connection)
+        => ExecuteDuckDbNonQuery(connection, """
+            CREATE TEMP TABLE IF NOT EXISTS temp_agg_trades_batch_rows (
+                parquetagg_trade_id BIGINT,
+                price DOUBLE,
+                quantity DOUBLE,
+                first_trade_id BIGINT,
+                last_trade_id BIGINT,
+                transact_time BIGINT,
+                is_buyer_maker BOOLEAN
+            );
+            CREATE TEMP TABLE IF NOT EXISTS temp_agg_trades_batch_keys (
+                parquetagg_trade_id BIGINT
+            );
+            """);
+
+    private static void EnsureBookDepthBatchTables(DuckDBConnection connection)
+        => ExecuteDuckDbNonQuery(connection, """
+            CREATE TEMP TABLE IF NOT EXISTS temp_book_depth_batch_rows (
+                snapshot_time BIGINT,
+                percentage DECIMAL(10,2),
+                depth DOUBLE,
+                notional DOUBLE
+            );
+            CREATE TEMP TABLE IF NOT EXISTS temp_book_depth_batch_keys (
+                snapshot_time BIGINT,
+                percentage DECIMAL(10,2)
+            );
+            """);
+
+    private static void ClearAggTradesBatchTables(DuckDBConnection connection, DuckDBTransaction transaction)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM temp_agg_trades_batch_rows;
+            DELETE FROM temp_agg_trades_batch_keys;
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void ClearBookDepthBatchTables(DuckDBConnection connection, DuckDBTransaction transaction)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM temp_book_depth_batch_rows;
+            DELETE FROM temp_book_depth_batch_keys;
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static DuckDBCommand CreateAggTradesBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    {
+        DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO temp_agg_trades_batch_rows
+            VALUES ($parquetagg_trade_id, $price, $quantity, $first_trade_id, $last_trade_id, $transact_time, $is_buyer_maker);
+            """;
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "parquetagg_trade_id", DbType = DbType.Int64 });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "price", DbType = DbType.Double });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "quantity", DbType = DbType.Double });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "first_trade_id", DbType = DbType.Int64 });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "last_trade_id", DbType = DbType.Int64 });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "transact_time", DbType = DbType.Int64 });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "is_buyer_maker", DbType = DbType.Boolean });
+        return command;
+    }
+
+    private static DuckDBCommand CreateAggTradesBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    {
+        DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO temp_agg_trades_batch_keys
+            VALUES ($parquetagg_trade_id);
+            """;
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "parquetagg_trade_id", DbType = DbType.Int64 });
+        return command;
+    }
+
+    private static DuckDBCommand CreateBookDepthBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    {
+        DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO temp_book_depth_batch_rows
+            VALUES ($snapshot_time, $percentage, $depth, $notional);
+            """;
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "snapshot_time", DbType = DbType.Int64 });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "percentage", DbType = DbType.Decimal });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "depth", DbType = DbType.Double });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "notional", DbType = DbType.Double });
+        return command;
+    }
+
+    private static DuckDBCommand CreateBookDepthBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    {
+        DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO temp_book_depth_batch_keys
+            VALUES ($snapshot_time, $percentage);
+            """;
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "snapshot_time", DbType = DbType.Int64 });
+        command.Parameters.Add(new DuckDBParameter { ParameterName = "percentage", DbType = DbType.Decimal });
+        return command;
+    }
+
+    private static void BindAggTradeRow(DuckDBCommand command, AggTradeImportRow row)
+    {
+        command.Parameters[0].Value = row.ParquetAggTradeId;
+        command.Parameters[1].Value = row.Price;
+        command.Parameters[2].Value = row.Quantity;
+        command.Parameters[3].Value = row.FirstTradeId;
+        command.Parameters[4].Value = row.LastTradeId;
+        command.Parameters[5].Value = row.TransactTime;
+        command.Parameters[6].Value = row.IsBuyerMaker;
+    }
+
+    private static void BindBookDepthRow(DuckDBCommand command, BookDepthImportRow row)
+    {
+        command.Parameters[0].Value = row.SnapshotTime;
+        command.Parameters[1].Value = row.Percentage;
+        command.Parameters[2].Value = row.Depth;
+        command.Parameters[3].Value = row.Notional;
+    }
+
+    private static long GetAggTradesCsvMinTimestamp(string csvPath, bool sourceIsMicroseconds)
+    {
+        long? minTimestamp = null;
+        using StreamReader reader = new(csvPath);
+        while (reader.ReadLine() is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            long timestamp = long.Parse(ReadCsvField(line.AsSpan(), 5), NumberStyles.Integer, InvariantCulture);
+            if (!sourceIsMicroseconds)
+                timestamp *= 1000;
+
+            minTimestamp = !minTimestamp.HasValue || timestamp < minTimestamp.Value
+                ? timestamp
+                : minTimestamp;
+        }
+
+        return minTimestamp ?? throw new InvalidDataException($"CSV does not contain aggTrades rows: {csvPath}");
+    }
+
+    private static long GetBookDepthCsvMinTimestamp(string csvPath)
+    {
+        long? minTimestamp = null;
+        using StreamReader reader = new(csvPath);
+        bool isFirstLine = true;
+        while (reader.ReadLine() is { } line)
+        {
+            if (isFirstLine)
+            {
+                isFirstLine = false;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            long timestamp = ParseBookDepth(line.AsSpan()).SnapshotTime;
+            minTimestamp = !minTimestamp.HasValue || timestamp < minTimestamp.Value
+                ? timestamp
+                : minTimestamp;
+        }
+
+        return minTimestamp ?? throw new InvalidDataException($"CSV does not contain bookDepth rows: {csvPath}");
+    }
+
+    private static AggTradeImportRow ParseAggTrade(ReadOnlySpan<char> line, bool sourceIsMicroseconds)
+    {
+        long transactTime = long.Parse(ReadCsvField(line, 5), NumberStyles.Integer, InvariantCulture);
+        if (!sourceIsMicroseconds)
+            transactTime *= 1000;
+
+        return new AggTradeImportRow(
+            long.Parse(ReadCsvField(line, 0), NumberStyles.Integer, InvariantCulture),
+            double.Parse(ReadCsvField(line, 1), NumberStyles.Float | NumberStyles.AllowThousands, InvariantCulture),
+            double.Parse(ReadCsvField(line, 2), NumberStyles.Float | NumberStyles.AllowThousands, InvariantCulture),
+            long.Parse(ReadCsvField(line, 3), NumberStyles.Integer, InvariantCulture),
+            long.Parse(ReadCsvField(line, 4), NumberStyles.Integer, InvariantCulture),
+            transactTime,
+            bool.Parse(ReadCsvField(line, 6)));
+    }
+
+    private static BookDepthImportRow ParseBookDepth(ReadOnlySpan<char> line)
+    {
+        DateTime snapshotTime = DateTime.ParseExact(
+            ReadCsvField(line, 0),
+            "yyyy-MM-dd HH:mm:ss",
+            InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+
+        return new BookDepthImportRow(
+            new DateTimeOffset(snapshotTime).ToUnixTimeMilliseconds(),
+            decimal.Parse(ReadCsvField(line, 1), NumberStyles.Number, InvariantCulture),
+            double.Parse(ReadCsvField(line, 2), NumberStyles.Float | NumberStyles.AllowThousands, InvariantCulture),
+            double.Parse(ReadCsvField(line, 3), NumberStyles.Float | NumberStyles.AllowThousands, InvariantCulture));
+    }
+
+    private static ReadOnlySpan<char> ReadCsvField(ReadOnlySpan<char> line, int fieldIndex)
+    {
+        int currentField = 0;
+        int start = 0;
+        for (int index = 0; index <= line.Length; index++)
+        {
+            if (index != line.Length && line[index] != ',')
+                continue;
+
+            if (currentField == fieldIndex)
+                return line[start..index];
+
+            currentField++;
+            start = index + 1;
+        }
+
+        throw new FormatException($"CSV line does not contain field index {fieldIndex}.");
+    }
+
+    private static void ExecuteDuckDbNonQuery(DuckDBConnection connection, string commandText)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = commandText;
+        command.ExecuteNonQuery();
+    }
+
     private static bool IsSupportedPropertyType(Type type)
     {
         Type underlyingType = Nullable.GetUnderlyingType(type) ?? type;
@@ -538,6 +1116,19 @@ internal static class DuckDbStorageHelper
         return result is not null && result is not DBNull && Convert.ToInt32(result) > 0;
     }
 
+    private static bool TableExists(DuckDBConnection connection, string tableName)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?;";
+        IDbDataParameter parameter = command.CreateParameter();
+        parameter.DbType = DbType.String;
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+
+        object? result = command.ExecuteScalar();
+        return result is not null && result is not DBNull && Convert.ToInt32(result) > 0;
+    }
+
     private static object ConvertToDbValue(object? value, Type declaredType)
     {
         if (value is null)
@@ -615,4 +1206,29 @@ internal static class DuckDbStorageHelper
 
     private static string QuoteIdentifier(string identifier)
         => "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+
+    private sealed class PooledListPolicy<T>(int initialCapacity) : PooledObjectPolicy<List<T>>
+    {
+        public override List<T> Create()
+            => new(initialCapacity);
+
+        public override bool Return(List<T> obj)
+        {
+            obj.Clear();
+            return true;
+        }
+    }
+
+    private sealed class PooledDictionaryPolicy<TKey, TValue>(int initialCapacity) : PooledObjectPolicy<Dictionary<TKey, TValue>>
+        where TKey : notnull
+    {
+        public override Dictionary<TKey, TValue> Create()
+            => new(initialCapacity);
+
+        public override bool Return(Dictionary<TKey, TValue> obj)
+        {
+            obj.Clear();
+            return true;
+        }
+    }
 }

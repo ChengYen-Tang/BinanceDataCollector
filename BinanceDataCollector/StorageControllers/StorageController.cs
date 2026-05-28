@@ -1,10 +1,8 @@
 ﻿using BinanceDataCollector.Collectors.BinanceMarketData;
 using BinanceDataCollector.WorkItems;
 using CollectorModels.Models.Storage;
-using DuckDB.NET.Data;
 using System.Diagnostics;
 using System.IO.Compression;
-using System.Security.Cryptography;
 
 namespace BinanceDataCollector.StorageControllers;
 
@@ -521,7 +519,7 @@ internal abstract class StorageController<T>
         await EnsureAggTradesStorageMigratedAsync(batch.Symbol, ct);
         string databasePath = GetAggTradesDatabasePath();
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await EnsureAggTradesStoredTimeNormalizedAsync(databasePath, batch.Symbol);
+        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, batch.Symbol, AggTradesMicrosecondsBoundary, ct);
 
         logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
@@ -537,18 +535,18 @@ internal abstract class StorageController<T>
             try
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
+                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
                 {
-                    EnsureAggTradesTable(connection, batch.Symbol);
-                    foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
-                    {
-                        LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
-                        ReplaceAggTradesTailFromCsv(connection, batch.Symbol, csvPath);
-                    }
+                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
+                    await DuckDbStorageHelper.ReplaceAggTradesTailFromCsvAsync(
+                        databasePath,
+                        batch.Symbol,
+                        csvPath,
+                        GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
+                        ct);
+                }
 
-                    ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
-                    return Task.CompletedTask;
-                });
+                await DuckDbStorageHelper.CheckpointAsync(databasePath, ct);
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
                 if (Directory.Exists(extractionDirectory))
@@ -598,15 +596,10 @@ internal abstract class StorageController<T>
             try
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
-                {
-                    EnsureBookDepthTable(connection, batch.Symbol);
-                    foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
-                        ReplaceBookDepthTailFromCsv(connection, batch.Symbol, csvPath);
+                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                    await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(databasePath, batch.Symbol, csvPath, ct);
 
-                    ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
-                    return Task.CompletedTask;
-                });
+                await DuckDbStorageHelper.CheckpointAsync(databasePath, ct);
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
                 if (Directory.Exists(extractionDirectory))
@@ -642,7 +635,7 @@ internal abstract class StorageController<T>
         if (!File.Exists(databasePath))
             return yearsReserved;
 
-        await EnsureAggTradesStoredTimeNormalizedAsync(databasePath, symbolName);
+        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, symbolName, AggTradesMicrosecondsBoundary, ct);
         long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "transact_time", null, ct);
         return latest.HasValue ? FromAggTradesUnixTime(latest.Value) : yearsReserved;
     }
@@ -841,19 +834,18 @@ internal abstract class StorageController<T>
                 return;
             }
 
-            await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
+            foreach (string csvPath in csvPaths)
             {
-                EnsureAggTradesTable(connection, symbolName);
-                NormalizeAggTradesStoredTimeIfNeeded(connection, symbolName);
-                foreach (string csvPath in csvPaths)
-                {
-                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
-                    AppendAggTradesFromCsv(connection, symbolName, csvPath);
-                }
+                LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
+                await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
+                    databasePath,
+                    symbolName,
+                    csvPath,
+                    GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
+                    ct);
+            }
 
-                ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
-                return Task.CompletedTask;
-            });
+            await DuckDbStorageHelper.CheckpointAsync(databasePath, ct);
 
             Directory.Delete(legacySymbolPath, true);
             logger.LogInformation("Finish migrating aggTrades legacy storage. Market: {Market}, Symbol: {Symbol}, ImportedFiles: {ImportedFiles}",
@@ -873,232 +865,6 @@ internal abstract class StorageController<T>
 
     private string GetLegacyAggTradesSymbolPath(string symbol)
         => GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbol);
-
-    private static void EnsureAggTradesTable(DuckDBConnection connection, string tableName)
-        => ExecuteDuckDbNonQuery(connection, $"""
-            CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
-                parquetagg_trade_id BIGINT,
-                price DOUBLE,
-                quantity DOUBLE,
-                first_trade_id BIGINT,
-                last_trade_id BIGINT,
-                transact_time BIGINT,
-                is_buyer_maker BOOLEAN
-            );
-            """);
-
-    private static void EnsureBookDepthTable(DuckDBConnection connection, string tableName)
-        => ExecuteDuckDbNonQuery(connection, $"""
-            CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
-                snapshot_time BIGINT,
-                percentage DECIMAL(10,2),
-                depth DOUBLE,
-                notional DOUBLE
-            );
-            """);
-
-    private void ReplaceAggTradesTailFromCsv(DuckDBConnection connection, string tableName, string csvPath)
-    {
-        BuildAggTradesStagingTable(connection, csvPath);
-
-        long? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(transact_time) FROM staging_agg_trades_deduped;") switch
-        {
-            null => null,
-            DBNull => null,
-            object value => Convert.ToInt64(value)
-        };
-
-        if (!replaceFrom.HasValue)
-        {
-            DropAggTradesStagingTables(connection);
-            return;
-        }
-
-        using DuckDBTransaction transaction = connection.BeginTransaction();
-
-        using (DuckDBCommand deleteCommand = connection.CreateCommand())
-        {
-            deleteCommand.Transaction = transaction;
-            deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE transact_time >= $replace_from;";
-            deleteCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom.Value));
-            deleteCommand.ExecuteNonQuery();
-        }
-
-        using (DuckDBCommand insertCommand = connection.CreateCommand())
-        {
-            insertCommand.Transaction = transaction;
-            insertCommand.CommandText = $"""
-                INSERT INTO {QuoteIdentifier(tableName)}
-                SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
-                FROM staging_agg_trades_deduped
-                ORDER BY transact_time, parquetagg_trade_id;
-                """;
-            insertCommand.ExecuteNonQuery();
-        }
-
-        transaction.Commit();
-        DropAggTradesStagingTables(connection);
-    }
-
-    private void AppendAggTradesFromCsv(DuckDBConnection connection, string tableName, string csvPath)
-    {
-        BuildAggTradesStagingTable(connection, csvPath);
-
-        using DuckDBCommand insertCommand = connection.CreateCommand();
-        insertCommand.CommandText = $"""
-            INSERT INTO {QuoteIdentifier(tableName)}
-            SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
-            FROM staging_agg_trades_deduped
-            ORDER BY transact_time, parquetagg_trade_id;
-            """;
-        insertCommand.ExecuteNonQuery();
-
-        DropAggTradesStagingTables(connection);
-    }
-
-    private static void ReplaceBookDepthTailFromCsv(DuckDBConnection connection, string tableName, string csvPath)
-    {
-        BuildBookDepthStagingTable(connection, csvPath);
-
-        long? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(snapshot_time) FROM staging_book_depth_deduped;") switch
-        {
-            null => null,
-            DBNull => null,
-            object value => Convert.ToInt64(value)
-        };
-
-        if (!replaceFrom.HasValue)
-        {
-            DropBookDepthStagingTables(connection);
-            return;
-        }
-
-        using DuckDBTransaction transaction = connection.BeginTransaction();
-
-        using (DuckDBCommand deleteCommand = connection.CreateCommand())
-        {
-            deleteCommand.Transaction = transaction;
-            deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE snapshot_time >= $replace_from;";
-            deleteCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom.Value));
-            deleteCommand.ExecuteNonQuery();
-        }
-
-        using (DuckDBCommand insertCommand = connection.CreateCommand())
-        {
-            insertCommand.Transaction = transaction;
-            insertCommand.CommandText = $"""
-                INSERT INTO {QuoteIdentifier(tableName)}
-                SELECT snapshot_time, percentage, depth, notional
-                FROM staging_book_depth_deduped
-                ORDER BY snapshot_time, percentage;
-                """;
-            insertCommand.ExecuteNonQuery();
-        }
-
-        transaction.Commit();
-        DropBookDepthStagingTables(connection);
-    }
-
-    private void BuildAggTradesStagingTable(DuckDBConnection connection, string csvPath)
-    {
-        DropAggTradesStagingTables(connection);
-
-        AggTradesTimeUnit sourceTimeUnit = GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath));
-        string transactTimeExpression = sourceTimeUnit switch
-        {
-            AggTradesTimeUnit.Milliseconds => "CAST(column5 AS BIGINT) * 1000",
-            AggTradesTimeUnit.Microseconds => "CAST(column5 AS BIGINT)",
-            _ => throw new NotSupportedException($"Unsupported aggTrades time unit: {sourceTimeUnit}."),
-        };
-        string csvLiteral = ToSqlStringLiteral(csvPath);
-        ExecuteDuckDbNonQuery(connection, $"""
-            CREATE TEMP TABLE staging_agg_trades AS
-            SELECT
-                CAST(column0 AS BIGINT) AS parquetagg_trade_id,
-                CAST(column1 AS DOUBLE) AS price,
-                CAST(column2 AS DOUBLE) AS quantity,
-                CAST(column3 AS BIGINT) AS first_trade_id,
-                CAST(column4 AS BIGINT) AS last_trade_id,
-                {transactTimeExpression} AS transact_time,
-                CAST(column6 AS BOOLEAN) AS is_buyer_maker
-            FROM read_csv({csvLiteral}, header = false, all_varchar = true);
-            """);
-
-        ExecuteDuckDbNonQuery(connection, """
-            CREATE TEMP TABLE staging_agg_trades_deduped AS
-            SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
-            FROM (
-                SELECT
-                    parquetagg_trade_id,
-                    price,
-                    quantity,
-                    first_trade_id,
-                    last_trade_id,
-                    transact_time,
-                    is_buyer_maker,
-                    ROW_NUMBER() OVER (PARTITION BY parquetagg_trade_id ORDER BY transact_time DESC, parquetagg_trade_id DESC) AS row_num
-                FROM staging_agg_trades
-            )
-            WHERE row_num = 1;
-            """);
-    }
-
-    private static void BuildBookDepthStagingTable(DuckDBConnection connection, string csvPath)
-    {
-        DropBookDepthStagingTables(connection);
-
-        string csvLiteral = ToSqlStringLiteral(csvPath);
-        ExecuteDuckDbNonQuery(connection, $"""
-            CREATE TEMP TABLE staging_book_depth AS
-            SELECT
-                epoch_ms(strptime("timestamp", '%Y-%m-%d %H:%M:%S')) AS snapshot_time,
-                CAST(percentage AS DECIMAL(10,2)) AS percentage,
-                CAST(depth AS DOUBLE) AS depth,
-                CAST(notional AS DOUBLE) AS notional
-            FROM read_csv({csvLiteral}, header = true, all_varchar = true);
-            """);
-
-        ExecuteDuckDbNonQuery(connection, """
-            CREATE TEMP TABLE staging_book_depth_deduped AS
-            SELECT snapshot_time, percentage, depth, notional
-            FROM (
-                SELECT
-                    snapshot_time,
-                    percentage,
-                    depth,
-                    notional,
-                    ROW_NUMBER() OVER (PARTITION BY snapshot_time, percentage ORDER BY snapshot_time DESC, percentage DESC) AS row_num
-                FROM staging_book_depth
-            )
-            WHERE row_num = 1;
-            """);
-    }
-
-    private static void DropAggTradesStagingTables(DuckDBConnection connection)
-        => ExecuteDuckDbNonQuery(connection, """
-            DROP TABLE IF EXISTS staging_agg_trades_deduped;
-            DROP TABLE IF EXISTS staging_agg_trades;
-            """);
-
-    private static void DropBookDepthStagingTables(DuckDBConnection connection)
-        => ExecuteDuckDbNonQuery(connection, """
-            DROP TABLE IF EXISTS staging_book_depth_deduped;
-            DROP TABLE IF EXISTS staging_book_depth;
-            """);
-
-    private static object? ExecuteDuckDbScalar(DuckDBConnection connection, string commandText)
-    {
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = commandText;
-        return command.ExecuteScalar();
-    }
-
-    private static void ExecuteDuckDbNonQuery(DuckDBConnection connection, string commandText)
-    {
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = commandText;
-        command.ExecuteNonQuery();
-    }
 
     private static async Task<string[]> ExtractArchiveEntriesAsync(string archivePath, string destinationDirectory, CancellationToken ct)
     {
@@ -1189,12 +955,9 @@ internal abstract class StorageController<T>
         return false;
     }
 
-    private static string ToSqlStringLiteral(string value)
-        => $"'{value.Replace("'", "''")}'";
-
     private async Task DeleteOldAggTradesRowsAsync(string databasePath, string tableName, CancellationToken ct)
     {
-        await EnsureAggTradesStoredTimeNormalizedAsync(databasePath, tableName);
+        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, tableName, AggTradesMicrosecondsBoundary, ct);
         await DuckDbStorageHelper.DeleteRowsBeforeAsync(
             databasePath,
             tableName,
@@ -1205,33 +968,6 @@ internal abstract class StorageController<T>
         long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "transact_time", null, ct);
         if (!latest.HasValue)
             await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
-    }
-
-    private async Task EnsureAggTradesStoredTimeNormalizedAsync(string databasePath, string tableName)
-    {
-        if (!File.Exists(databasePath))
-            return;
-
-        await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
-        {
-            NormalizeAggTradesStoredTimeIfNeeded(connection, tableName);
-            return Task.CompletedTask;
-        });
-    }
-
-    private static void NormalizeAggTradesStoredTimeIfNeeded(DuckDBConnection connection, string tableName)
-    {
-        if (!DuckDbTableExists(connection, tableName))
-            return;
-
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = $"""
-            UPDATE {QuoteIdentifier(tableName)}
-            SET transact_time = transact_time * 1000
-            WHERE transact_time < $microseconds_boundary;
-            """;
-        command.Parameters.Add(new DuckDBParameter("microseconds_boundary", AggTradesMicrosecondsBoundary));
-        command.ExecuteNonQuery();
     }
 
     protected virtual AggTradesTimeUnit GetAggTradesTimeUnitForTimestamp(DateTime timestamp)
@@ -1288,21 +1024,6 @@ internal abstract class StorageController<T>
         long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "snapshot_time", null, ct);
         if (!latest.HasValue)
             await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
-    }
-
-    private static string QuoteIdentifier(string value)
-        => "\"" + value.Replace("\"", "\"\"") + "\"";
-
-    private static bool DuckDbTableExists(DuckDBConnection connection, string tableName)
-    {
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT COUNT(*)
-            FROM information_schema.tables
-            WHERE table_name = $table_name;
-            """;
-        command.Parameters.Add(new DuckDBParameter("table_name", tableName));
-        return Convert.ToInt32(command.ExecuteScalar()) > 0;
     }
 
     private string GetMarketDataMarketPath(string dataType)
