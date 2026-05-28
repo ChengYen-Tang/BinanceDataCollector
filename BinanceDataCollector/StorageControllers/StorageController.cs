@@ -1,12 +1,20 @@
 ﻿using BinanceDataCollector.Collectors.BinanceMarketData;
 using BinanceDataCollector.WorkItems;
 using CollectorModels.Models.Storage;
+using Microsoft.Extensions.ObjectPool;
 using System.Diagnostics;
 using System.IO.Compression;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal sealed record SymbolRows<T>(string SymbolName, IList<T> Rows);
+internal sealed class SymbolRows<T>(string symbolName, List<T> rows, ObjectPool<List<T>> rowsPool) : IDisposable
+{
+    public string SymbolName { get; } = symbolName;
+    public List<T> Rows { get; } = rows;
+
+    public void Dispose()
+        => rowsPool.Return(Rows);
+}
 
 internal enum AggTradesTimeUnit
 {
@@ -18,6 +26,7 @@ internal abstract class StorageController<T>
     where T : class
 {
     private const long AggTradesMicrosecondsBoundary = 1_000_000_000_000_000L;
+    private const int BinanceApiModelRowsInitialCapacity = 1_500;
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
@@ -56,6 +65,38 @@ internal abstract class StorageController<T>
 
     public StorageController(IServiceProvider serviceProvider, ILogger logger)
         => (this.serviceProvider, this.logger, yearsReserved) = (serviceProvider, logger, DateTime.Today.AddYears(-3));
+
+    protected static List<TModel> RentModelRows<TModel>()
+        => PooledObjectHelper.RentList<TModel>(BinanceApiModelRowsInitialCapacity);
+
+    protected static SymbolRows<TModel> CreateSymbolRows<TModel>(string symbolName, List<TModel> rows)
+        => new(symbolName, rows, PooledObjectHelper.GetListPool<TModel>(BinanceApiModelRowsInitialCapacity));
+
+    protected static SymbolRows<TModel> CreateEmptySymbolRows<TModel>(string symbolName)
+        => CreateSymbolRows(symbolName, RentModelRows<TModel>());
+
+    protected static List<TModel> ConvertToModelRows<TSource, TModel>(IEnumerable<TSource> source, Func<TSource, TModel> map)
+    {
+        List<TModel> rows = RentModelRows<TModel>();
+        foreach (TSource item in source)
+            rows.Add(map(item));
+        return rows;
+    }
+
+    protected static List<TModel> ConvertToModelRows<TSource, TModel>(
+        IEnumerable<TSource> source,
+        Func<TSource, bool> predicate,
+        Func<TSource, TModel> map)
+    {
+        List<TModel> rows = RentModelRows<TModel>();
+        foreach (TSource item in source)
+        {
+            if (predicate(item))
+                rows.Add(map(item));
+        }
+
+        return rows;
+    }
 
     public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
     {
@@ -109,10 +150,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(Kline), symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new(InsertKlinesAsync, new SymbolRows<Kline>(symbolName, []), ct);
+            return new(InsertKlinesAsync, CreateEmptySymbolRows<Kline>(symbolName), ct);
         }
 
-        return new(InsertKlinesAsync, new SymbolRows<Kline>(symbolName, result.Value), ct);
+        return new(InsertKlinesAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<PremiumIndexKline>>> UpdateIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -126,10 +167,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(PremiumIndexKline), symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new(InsertIndexPriceKlinesAsync, new SymbolRows<PremiumIndexKline>(symbolName, []), ct);
+            return new(InsertIndexPriceKlinesAsync, CreateEmptySymbolRows<PremiumIndexKline>(symbolName), ct);
         }
 
-        return new(InsertIndexPriceKlinesAsync, new SymbolRows<PremiumIndexKline>(symbolName, result.Value), ct);
+        return new(InsertIndexPriceKlinesAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<PremiumIndexKline>>> UpdateMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -143,10 +184,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(PremiumIndexKline), symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new(InsertMarkPriceKlinesAsync, new SymbolRows<PremiumIndexKline>(symbolName, []), ct);
+            return new(InsertMarkPriceKlinesAsync, CreateEmptySymbolRows<PremiumIndexKline>(symbolName), ct);
         }
 
-        return new(InsertMarkPriceKlinesAsync, new SymbolRows<PremiumIndexKline>(symbolName, result.Value), ct);
+        return new(InsertMarkPriceKlinesAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<PremiumIndexKline>>> UpdatePremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -160,10 +201,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(PremiumIndexKline), symbol, result.Errors[0].Message, interval, startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new(InsertPremiumIndexKlinesAsync, new SymbolRows<PremiumIndexKline>(symbolName, []), ct);
+            return new(InsertPremiumIndexKlinesAsync, CreateEmptySymbolRows<PremiumIndexKline>(symbolName), ct);
         }
 
-        return new(InsertPremiumIndexKlinesAsync, new SymbolRows<PremiumIndexKline>(symbolName, result.Value), ct);
+        return new(InsertPremiumIndexKlinesAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<FundingRate>>> UpdateFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -177,10 +218,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(FundingRate), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<FundingRate>>(InsertFundingRatesAsync, new SymbolRows<FundingRate>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<FundingRate>>(InsertFundingRatesAsync, CreateEmptySymbolRows<FundingRate>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<FundingRate>>(InsertFundingRatesAsync, new SymbolRows<FundingRate>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<FundingRate>>(InsertFundingRatesAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<OpenInterestHistory>>> UpdateOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -194,10 +235,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(OpenInterestHistory), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<OpenInterestHistory>>(InsertOpenInterestHistoriesAsync, new SymbolRows<OpenInterestHistory>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<OpenInterestHistory>>(InsertOpenInterestHistoriesAsync, CreateEmptySymbolRows<OpenInterestHistory>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<OpenInterestHistory>>(InsertOpenInterestHistoriesAsync, new SymbolRows<OpenInterestHistory>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<OpenInterestHistory>>(InsertOpenInterestHistoriesAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<LongShortRatioCsv>>> UpdateTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -211,10 +252,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(LongShortRatioCsv), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortPositionRatiosAsync, new SymbolRows<LongShortRatioCsv>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortPositionRatiosAsync, CreateEmptySymbolRows<LongShortRatioCsv>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortPositionRatiosAsync, new SymbolRows<LongShortRatioCsv>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortPositionRatiosAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<LongShortRatioCsv>>> UpdateTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -228,10 +269,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(LongShortRatioCsv), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortAccountRatiosAsync, new SymbolRows<LongShortRatioCsv>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortAccountRatiosAsync, CreateEmptySymbolRows<LongShortRatioCsv>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortAccountRatiosAsync, new SymbolRows<LongShortRatioCsv>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertTopLongShortAccountRatiosAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<LongShortRatioCsv>>> UpdateGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -245,10 +286,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(LongShortRatioCsv), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertGlobalLongShortAccountRatiosAsync, new SymbolRows<LongShortRatioCsv>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertGlobalLongShortAccountRatiosAsync, CreateEmptySymbolRows<LongShortRatioCsv>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertGlobalLongShortAccountRatiosAsync, new SymbolRows<LongShortRatioCsv>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<LongShortRatioCsv>>(InsertGlobalLongShortAccountRatiosAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<TakerLongShortRatioCsv>>> UpdateTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -262,10 +303,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(TakerLongShortRatioCsv), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<TakerLongShortRatioCsv>>(InsertTakerLongShortRatiosAsync, new SymbolRows<TakerLongShortRatioCsv>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<TakerLongShortRatioCsv>>(InsertTakerLongShortRatiosAsync, CreateEmptySymbolRows<TakerLongShortRatioCsv>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<TakerLongShortRatioCsv>>(InsertTakerLongShortRatiosAsync, new SymbolRows<TakerLongShortRatioCsv>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<TakerLongShortRatioCsv>>(InsertTakerLongShortRatiosAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<FuturesBasisCsv>>> UpdateBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default)
@@ -279,10 +320,10 @@ internal abstract class StorageController<T>
             LogSyncFailure(nameof(FuturesBasisCsv), symbol, result.Errors[0].Message, startTime: startTime);
             if (result.Errors[0].Message != "Invalid symbol.")
                 await Task.Delay(30 * 60 * 1000, ct);
-            return new AsyncWorkItem<SymbolRows<FuturesBasisCsv>>(InsertBasisAsync, new SymbolRows<FuturesBasisCsv>(symbolName, []), ct);
+            return new AsyncWorkItem<SymbolRows<FuturesBasisCsv>>(InsertBasisAsync, CreateEmptySymbolRows<FuturesBasisCsv>(symbolName), ct);
         }
 
-        return new AsyncWorkItem<SymbolRows<FuturesBasisCsv>>(InsertBasisAsync, new SymbolRows<FuturesBasisCsv>(symbolName, result.Value), ct);
+        return new AsyncWorkItem<SymbolRows<FuturesBasisCsv>>(InsertBasisAsync, CreateSymbolRows(symbolName, result.Value), ct);
     }
 
     public async Task<AsyncWorkItem<MarketDataDownloadBatch?>> UpdateAggTradesAsync(
@@ -331,90 +372,72 @@ internal abstract class StorageController<T>
         => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
             dataType, symbol, interval, startTime, message);
 
-    protected TEntity[] DeduplicateByKey<TEntity, TKey>(IList<TEntity> entities, Func<TEntity, TKey> getKey)
+    protected async Task InsertDeduplicatedRowsAsync<TEntity, TKey>(
+        string dbPath,
+        SymbolRows<TEntity> batch,
+        string keyColumn,
+        Func<TEntity, TKey> getKey,
+        CancellationToken ct = default)
         where TKey : notnull
     {
-        if (entities.Count <= 1)
-            return [.. entities];
-
-        Dictionary<TKey, TEntity> uniqueEntities = [];
-        foreach (TEntity entity in entities)
-            uniqueEntities[getKey(entity)] = entity;
-
-        if (uniqueEntities.Count != entities.Count)
-            logger.LogWarning("Deduplicated insert batch. DataType: {DataType}, OriginalCount: {OriginalCount}, UniqueCount: {UniqueCount}",
-                typeof(TEntity).Name, entities.Count, uniqueEntities.Count);
-
-        return [.. uniqueEntities.Values];
-    }
-
-    protected async Task InsertKlinesAsync(SymbolRows<Kline> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        Kline[] uniqueKlines = DeduplicateByKey(batch.Rows, item => item.CloseTime);
+        List<TEntity>? uniqueRows = null;
+        ObjectPool<Dictionary<TKey, TEntity>>? uniqueEntitiesPool = null;
+        Dictionary<TKey, TEntity>? uniqueEntities = null;
         try
         {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(Kline), uniqueKlines.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(KlinePath, batch.SymbolName, uniqueKlines, nameof(Kline.CloseTime), ct);
-            logger.LogDebug($"Finish inserting.");
+            if (batch.Rows.Count == 0)
+                return;
+
+            IReadOnlyList<TEntity> rows = batch.Rows;
+            if (batch.Rows.Count > 1)
+            {
+                uniqueEntitiesPool = PooledObjectHelper.GetDictionaryPool<TKey, TEntity>(batch.Rows.Count);
+                uniqueEntities = uniqueEntitiesPool.Get();
+                foreach (TEntity entity in batch.Rows)
+                    uniqueEntities[getKey(entity)] = entity;
+
+                if (uniqueEntities.Count != batch.Rows.Count)
+                {
+                    logger.LogWarning("Deduplicated insert batch. DataType: {DataType}, OriginalCount: {OriginalCount}, UniqueCount: {UniqueCount}",
+                        typeof(TEntity).Name, batch.Rows.Count, uniqueEntities.Count);
+                    uniqueRows = RentModelRows<TEntity>();
+                    uniqueRows.AddRange(uniqueEntities.Values);
+                    rows = uniqueRows;
+                }
+            }
+
+            try
+            {
+                logger.LogDebug("Start inserting {DataType}. Count: {Count}", typeof(TEntity).Name, rows.Count);
+                await DuckDbStorageHelper.UpsertRowsAsync(dbPath, batch.SymbolName, rows, keyColumn, ct);
+                logger.LogDebug("Finish inserting.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
+            if (uniqueRows is not null)
+                PooledObjectHelper.ReturnList(uniqueRows, BinanceApiModelRowsInitialCapacity);
+            if (uniqueEntities is not null && uniqueEntitiesPool is not null)
+                uniqueEntitiesPool.Return(uniqueEntities);
+            batch.Dispose();
         }
     }
 
-    protected async Task InsertPremiumIndexKlinesAsync(SymbolRows<PremiumIndexKline> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        PremiumIndexKline[] uniqueKlines = DeduplicateByKey(batch.Rows, item => item.CloseTime);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(PremiumIndexKline), uniqueKlines.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(PremiumIndexKlinePath, batch.SymbolName, uniqueKlines, nameof(PremiumIndexKline.CloseTime), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertKlinesAsync(SymbolRows<Kline> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(KlinePath, batch, nameof(Kline.CloseTime), item => item.CloseTime, ct);
 
-    protected async Task InsertIndexPriceKlinesAsync(SymbolRows<PremiumIndexKline> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        PremiumIndexKline[] uniqueKlines = DeduplicateByKey(batch.Rows, item => item.CloseTime);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(PremiumIndexKline), uniqueKlines.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(IndexPriceKlinePath, batch.SymbolName, uniqueKlines, nameof(PremiumIndexKline.CloseTime), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertPremiumIndexKlinesAsync(SymbolRows<PremiumIndexKline> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(PremiumIndexKlinePath, batch, nameof(PremiumIndexKline.CloseTime), item => item.CloseTime, ct);
 
-    protected async Task InsertMarkPriceKlinesAsync(SymbolRows<PremiumIndexKline> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        PremiumIndexKline[] uniqueKlines = DeduplicateByKey(batch.Rows, item => item.CloseTime);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(PremiumIndexKline), uniqueKlines.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(MarkPriceKlinePath, batch.SymbolName, uniqueKlines, nameof(PremiumIndexKline.CloseTime), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertIndexPriceKlinesAsync(SymbolRows<PremiumIndexKline> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(IndexPriceKlinePath, batch, nameof(PremiumIndexKline.CloseTime), item => item.CloseTime, ct);
+
+    protected Task InsertMarkPriceKlinesAsync(SymbolRows<PremiumIndexKline> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(MarkPriceKlinePath, batch, nameof(PremiumIndexKline.CloseTime), item => item.CloseTime, ct);
 
     protected Task InsertTopLongShortPositionRatiosAsync(SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
         => InsertLongShortRatiosAsync(TopLongShortPositionRatioPath, batch, ct);
@@ -425,90 +448,20 @@ internal abstract class StorageController<T>
     protected Task InsertGlobalLongShortAccountRatiosAsync(SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
         => InsertLongShortRatiosAsync(GlobalLongShortAccountRatioPath, batch, ct);
 
-    private async Task InsertLongShortRatiosAsync(string dbPath, SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        LongShortRatioCsv[] uniqueRatios = DeduplicateByKey(batch.Rows, item => item.Timestamp);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(LongShortRatioCsv), uniqueRatios.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(dbPath, batch.SymbolName, uniqueRatios, nameof(LongShortRatioCsv.Timestamp), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    private Task InsertLongShortRatiosAsync(string dbPath, SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(dbPath, batch, nameof(LongShortRatioCsv.Timestamp), item => item.Timestamp, ct);
 
-    protected async Task InsertTakerLongShortRatiosAsync(SymbolRows<TakerLongShortRatioCsv> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        TakerLongShortRatioCsv[] uniqueRatios = DeduplicateByKey(batch.Rows, item => item.Timestamp);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(TakerLongShortRatioCsv), uniqueRatios.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(TakerLongShortRatioPath, batch.SymbolName, uniqueRatios, nameof(TakerLongShortRatioCsv.Timestamp), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertTakerLongShortRatiosAsync(SymbolRows<TakerLongShortRatioCsv> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(TakerLongShortRatioPath, batch, nameof(TakerLongShortRatioCsv.Timestamp), item => item.Timestamp, ct);
 
-    protected async Task InsertBasisAsync(SymbolRows<FuturesBasisCsv> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        FuturesBasisCsv[] uniqueHistories = DeduplicateByKey(batch.Rows, item => item.Timestamp);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(FuturesBasisCsv), uniqueHistories.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(BasisPath, batch.SymbolName, uniqueHistories, nameof(FuturesBasisCsv.Timestamp), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertBasisAsync(SymbolRows<FuturesBasisCsv> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(BasisPath, batch, nameof(FuturesBasisCsv.Timestamp), item => item.Timestamp, ct);
 
-    protected async Task InsertOpenInterestHistoriesAsync(SymbolRows<OpenInterestHistory> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        OpenInterestHistory[] uniqueOpenInterestHistories = DeduplicateByKey(batch.Rows, item => item.Timestamp);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(OpenInterestHistory), uniqueOpenInterestHistories.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(OpenInterestPath, batch.SymbolName, uniqueOpenInterestHistories, nameof(OpenInterestHistory.Timestamp), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertOpenInterestHistoriesAsync(SymbolRows<OpenInterestHistory> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(OpenInterestPath, batch, nameof(OpenInterestHistory.Timestamp), item => item.Timestamp, ct);
 
-    protected async Task InsertFundingRatesAsync(SymbolRows<FundingRate> batch, CancellationToken ct = default)
-    {
-        if (!batch.Rows.Any())
-            return;
-        FundingRate[] uniqueRates = DeduplicateByKey(batch.Rows, item => item.FundingTime);
-        try
-        {
-            logger.LogDebug("Start inserting {DataType}. Count: {Count}", nameof(FundingRate), uniqueRates.Length);
-            await DuckDbStorageHelper.UpsertRowsAsync(FundingRatePath, batch.SymbolName, uniqueRates, nameof(FundingRate.FundingTime), ct);
-            logger.LogDebug("Finish inserting.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
-        }
-    }
+    protected Task InsertFundingRatesAsync(SymbolRows<FundingRate> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(FundingRatePath, batch, nameof(FundingRate.FundingTime), item => item.FundingTime, ct);
 
     protected virtual async Task InsertAggTradesAsync(MarketDataDownloadBatch? batch, CancellationToken ct = default)
     {

@@ -97,7 +97,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         Result<List<IBinanceKline>> result = await coinFutures.GetKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new Kline
+        return Result.Ok(ConvertToModelRows(result.Value, kline => new Kline
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
@@ -110,7 +110,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             TradeCount = kline.TradeCount,
             OpenTime = ToUnixMilliseconds(kline.OpenTime),
             CloseTime = ToUnixMilliseconds(kline.CloseTime)
-        }).ToList());
+        }));
     }
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
@@ -129,12 +129,12 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.AsParallel().Select(rate => new FundingRate
+        return Result.Ok(ConvertToModelRows(result.Value, rate => new FundingRate
         {
             Rate = decimal.ToDouble(rate.FundingRate),
             FundingTime = ToUnixMilliseconds(rate.FundingTime),
             MarkPrice = rate.MarkPrice.HasValue ? decimal.ToDouble(rate.MarkPrice.Value) : null,
-        }).ToList());
+        }));
     }
 
     public override Task<DateTime> GetLastOpenInterestTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
@@ -149,15 +149,15 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        List<OpenInterestHistory> openInterestHistories = result.Value
-            .Where(item => item.Timestamp.HasValue)
-            .AsParallel()
-            .Select(item => new OpenInterestHistory
+        List<OpenInterestHistory> openInterestHistories = ConvertToModelRows(
+            result.Value,
+            item => item.Timestamp.HasValue,
+            item => new OpenInterestHistory
             {
                 Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
                 SumOpenInterest = decimal.ToDouble(item.SumOpenInterest),
                 SumOpenInterestValue = decimal.ToDouble(item.SumOpenInterestValue)
-            }).ToList();
+            });
         return Result.Ok(openInterestHistories);
     }
 
@@ -170,13 +170,13 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new LongShortRatioCsv
+        return Result.Ok(ConvertToModelRows(result.Value, item => item.Timestamp.HasValue, item => new LongShortRatioCsv
         {
             Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             LongShortRatio = decimal.ToDouble(item.LongShortRatio),
             LongAccount = decimal.ToDouble(item.LongAccount),
             ShortAccount = decimal.ToDouble(item.ShortAccount)
-        }).ToList());
+        }));
     }
 
     public override Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
@@ -188,13 +188,13 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new LongShortRatioCsv
+        return Result.Ok(ConvertToModelRows(result.Value, item => item.Timestamp.HasValue, item => new LongShortRatioCsv
         {
             Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             LongShortRatio = decimal.ToDouble(item.LongShortRatio),
             LongAccount = decimal.ToDouble(item.LongAccount),
             ShortAccount = decimal.ToDouble(item.ShortAccount)
-        }).ToList());
+        }));
     }
 
     public override Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
@@ -209,13 +209,13 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp.HasValue).AsParallel().Select(item => new LongShortRatioCsv
+        return Result.Ok(ConvertToModelRows(result.Value, item => item.Timestamp.HasValue, item => new LongShortRatioCsv
         {
             Timestamp = ToUnixMilliseconds(item.Timestamp!.Value),
             LongShortRatio = decimal.ToDouble(item.LongShortRatio),
             LongAccount = decimal.ToDouble(item.LongAccount),
             ShortAccount = decimal.ToDouble(item.ShortAccount)
-        }).ToList());
+        }));
     }
 
     protected override async Task<Result<List<FuturesBasisCsv>>> GetBasisAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
@@ -224,7 +224,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.AsParallel().Select(item => new FuturesBasisCsv
+        return Result.Ok(ConvertToModelRows(result.Value, item => new FuturesBasisCsv
         {
             Timestamp = ToUnixMilliseconds(item.Timestamp),
             FuturesPrice = decimal.ToDouble(item.FuturesPrice),
@@ -232,7 +232,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             BasisValue = decimal.ToDouble(item.Basis),
             BasisRate = decimal.ToDouble(item.BasisRate),
             AnnualizedBasisRate = item.AnnualizedBasisRate.HasValue ? decimal.ToDouble(item.AnnualizedBasisRate.Value) : null
-        }).ToList());
+        }));
     }
 
     protected override async Task<Result<List<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
@@ -241,7 +241,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         if (result.IsFailed)
             return Result.Fail(result.Errors);
 
-        return Result.Ok(result.Value.Where(item => item.Timestamp != DateTime.MinValue).AsParallel().Select(item => new TakerLongShortRatioCsv
+        return Result.Ok(ConvertToModelRows(result.Value, item => item.Timestamp != DateTime.MinValue, item => new TakerLongShortRatioCsv
         {
             Timestamp = ToUnixMilliseconds(item.Timestamp),
             BuySellRatio = item.TakerSellVolume == 0 ? null : decimal.ToDouble(item.TakerBuyVolume / item.TakerSellVolume),
@@ -249,7 +249,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             SellVolume = decimal.ToDouble(item.TakerSellVolume),
             BuyVolumeValue = decimal.ToDouble(item.TakerBuyVolumeValue),
             SellVolumeValue = decimal.ToDouble(item.TakerSellVolumeValue)
-        }).ToList());
+        }));
     }
 
     protected override async Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -257,7 +257,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await coinFutures.GetPremiumIndexKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new PremiumIndexKline()
+        return Result.Ok(ConvertToModelRows(result.Value, kline => new PremiumIndexKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
@@ -265,7 +265,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             LowPrice = decimal.ToDouble(kline.LowPrice),
             OpenTime = ToUnixMilliseconds(kline.OpenTime),
             CloseTime = ToUnixMilliseconds(kline.CloseTime)
-        }).ToList());
+        }));
     }
 
     protected override async Task<Result<List<PremiumIndexKline>>> GetIndexPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -273,7 +273,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await coinFutures.GetIndexPriceKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new PremiumIndexKline()
+        return Result.Ok(ConvertToModelRows(result.Value, kline => new PremiumIndexKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
@@ -281,7 +281,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             LowPrice = decimal.ToDouble(kline.LowPrice),
             OpenTime = ToUnixMilliseconds(kline.OpenTime),
             CloseTime = ToUnixMilliseconds(kline.CloseTime)
-        }).ToList());
+        }));
     }
 
     protected override async Task<Result<List<PremiumIndexKline>>> GetMarkPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -289,7 +289,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
         Result<List<Binance.Net.Objects.Models.Spot.BinanceMarkIndexKline>> result = await coinFutures.GetMarkPriceKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new PremiumIndexKline()
+        return Result.Ok(ConvertToModelRows(result.Value, kline => new PremiumIndexKline()
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
@@ -297,7 +297,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
             LowPrice = decimal.ToDouble(kline.LowPrice),
             OpenTime = ToUnixMilliseconds(kline.OpenTime),
             CloseTime = ToUnixMilliseconds(kline.CloseTime)
-        }).ToList());
+        }));
     }
 
     protected override async Task<Result<List<SymbolInfoCsv>>> GetMarketAsync(CancellationToken ct = default)

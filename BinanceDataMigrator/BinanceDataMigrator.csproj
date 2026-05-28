@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Compile Include="..\BinanceDataCollector\DuckDbStorageHelper.cs" Link="DuckDbStorageHelper.cs" />
+    <Compile Include="..\BinanceDataCollector\PooledObjectHelper.cs" Link="PooledObjectHelper.cs" />
   </ItemGroup>
 
 </Project>

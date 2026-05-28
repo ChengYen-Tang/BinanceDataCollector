@@ -98,7 +98,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
         Result<List<IBinanceKline>> result = await spot.GetKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(result.Value.AsParallel().Select(kline => new Kline
+        return Result.Ok(ConvertToModelRows(result.Value, kline => new Kline
         {
             OpenPrice = decimal.ToDouble(kline.OpenPrice),
             ClosePrice = decimal.ToDouble(kline.ClosePrice),
@@ -111,7 +111,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
             TradeCount = kline.TradeCount,
             OpenTime = ToUnixMilliseconds(kline.OpenTime),
             CloseTime = ToUnixMilliseconds(kline.CloseTime)
-        }).ToList());
+        }));
     }
 
     protected override Task<Result<MarketDataDownloadBatch>> GetAggTradesAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)

@@ -6,7 +6,6 @@ using System.Reflection;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.Extensions.ObjectPool;
 
 namespace BinanceDataCollector;
 
@@ -20,11 +19,10 @@ internal static class DuckDbStorageHelper
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(PathComparer);
     private static readonly object LifecycleSync = new();
     private static readonly ManualResetEventSlim NoActiveOperations = new(initialState: true);
-    private static readonly DefaultObjectPoolProvider PoolProvider = new();
-    private static readonly ObjectPool<List<AggTradeImportRow>> AggTradeBatchPool = PoolProvider.Create(new PooledListPolicy<AggTradeImportRow>(MarketDataImportBatchSize));
-    private static readonly ObjectPool<Dictionary<long, AggTradeImportRow>> AggTradeDedupPool = PoolProvider.Create(new PooledDictionaryPolicy<long, AggTradeImportRow>(MarketDataImportBatchSize));
-    private static readonly ObjectPool<List<BookDepthImportRow>> BookDepthBatchPool = PoolProvider.Create(new PooledListPolicy<BookDepthImportRow>(MarketDataImportBatchSize));
-    private static readonly ObjectPool<Dictionary<BookDepthRowKey, BookDepthImportRow>> BookDepthDedupPool = PoolProvider.Create(new PooledDictionaryPolicy<BookDepthRowKey, BookDepthImportRow>(MarketDataImportBatchSize));
+    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<List<AggTradeImportRow>> AggTradeBatchPool = PooledObjectHelper.GetListPool<AggTradeImportRow>(MarketDataImportBatchSize);
+    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<Dictionary<long, AggTradeImportRow>> AggTradeDedupPool = PooledObjectHelper.GetDictionaryPool<long, AggTradeImportRow>(MarketDataImportBatchSize);
+    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<List<BookDepthImportRow>> BookDepthBatchPool = PooledObjectHelper.GetListPool<BookDepthImportRow>(MarketDataImportBatchSize);
+    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<Dictionary<BookDepthRowKey, BookDepthImportRow>> BookDepthDedupPool = PooledObjectHelper.GetDictionaryPool<BookDepthRowKey, BookDepthImportRow>(MarketDataImportBatchSize);
     private static int activeOperations;
     private static bool isClosing;
 
@@ -80,7 +78,7 @@ internal static class DuckDbStorageHelper
         {
             ct.ThrowIfCancellationRequested();
 
-            List<T> recordList = [.. records];
+            IReadOnlyList<T> recordList = records as IReadOnlyList<T> ?? [.. records];
             if (recordList.Count == 0)
                 return;
 
@@ -1207,28 +1205,4 @@ internal static class DuckDbStorageHelper
     private static string QuoteIdentifier(string identifier)
         => "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
 
-    private sealed class PooledListPolicy<T>(int initialCapacity) : PooledObjectPolicy<List<T>>
-    {
-        public override List<T> Create()
-            => new(initialCapacity);
-
-        public override bool Return(List<T> obj)
-        {
-            obj.Clear();
-            return true;
-        }
-    }
-
-    private sealed class PooledDictionaryPolicy<TKey, TValue>(int initialCapacity) : PooledObjectPolicy<Dictionary<TKey, TValue>>
-        where TKey : notnull
-    {
-        public override Dictionary<TKey, TValue> Create()
-            => new(initialCapacity);
-
-        public override bool Return(Dictionary<TKey, TValue> obj)
-        {
-            obj.Clear();
-            return true;
-        }
-    }
 }
