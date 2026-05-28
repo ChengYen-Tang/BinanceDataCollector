@@ -10,6 +10,12 @@ namespace BinanceDataCollector.StorageControllers;
 
 internal sealed record SymbolRows<T>(string SymbolName, IList<T> Rows);
 
+internal enum AggTradesTimeUnit
+{
+    Milliseconds,
+    Microseconds,
+}
+
 internal abstract class StorageController<T>
     where T : class
 {
@@ -47,6 +53,7 @@ internal abstract class StorageController<T>
     protected abstract string TakerLongShortRatioPath { get; }
     protected abstract string BasisPath { get; }
     protected abstract bool IsFutures { get; }
+    protected abstract AggTradesTimeUnit AggTradesTimeUnit { get; }
 
     public StorageController(IServiceProvider serviceProvider, ILogger logger)
         => (this.serviceProvider, this.logger, yearsReserved) = (serviceProvider, logger, DateTime.Today.AddYears(-3));
@@ -532,7 +539,10 @@ internal abstract class StorageController<T>
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
                 foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                {
+                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
                     ReplaceAggTradesTailFromCsv(connection, batch.Symbol, csvPath);
+                }
 
                 ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
                 DeleteFileIfExists(file.TempZipPath);
@@ -626,8 +636,8 @@ internal abstract class StorageController<T>
         if (!File.Exists(databasePath))
             return yearsReserved;
 
-        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "transact_time", null, ct);
-        return latest ?? yearsReserved;
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "transact_time", null, ct);
+        return latest.HasValue ? FromAggTradesUnixTime(latest.Value) : yearsReserved;
     }
 
     public virtual async Task<DateTime> GetLastBookDepthAsync(T symbol, CancellationToken ct = default)
@@ -637,8 +647,8 @@ internal abstract class StorageController<T>
         if (!File.Exists(databasePath))
             return yearsReserved;
 
-        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "snapshot_time", null, ct);
-        return latest ?? yearsReserved;
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "snapshot_time", null, ct);
+        return latest.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(latest.Value).UtcDateTime : yearsReserved;
     }
 
     protected async Task<DateTime> GetLastTimestampAsync(
@@ -797,8 +807,8 @@ internal abstract class StorageController<T>
             return;
 
         string databasePath = GetAggTradesDatabasePath();
-        DateTime? existingLatest = File.Exists(databasePath)
-            ? await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, symbolName, "transact_time", null, ct)
+        long? existingLatest = File.Exists(databasePath)
+            ? await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "transact_time", null, ct)
             : null;
         if (existingLatest.HasValue)
         {
@@ -829,7 +839,10 @@ internal abstract class StorageController<T>
                 using DuckDBConnection connection = OpenDuckDbConnection(databasePath);
                 EnsureAggTradesTable(connection, symbolName);
                 foreach (string csvPath in csvPaths)
+                {
+                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
                     AppendAggTradesFromCsv(connection, symbolName, csvPath);
+                }
                 ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
             }
             else
@@ -839,7 +852,10 @@ internal abstract class StorageController<T>
                 using DuckDBConnection connection = OpenDuckDbConnection(stagingDatabasePath);
                 EnsureAggTradesTable(connection, symbolName);
                 foreach (string csvPath in csvPaths)
+                {
+                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
                     AppendAggTradesFromCsv(connection, symbolName, csvPath);
+                }
 
                 ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
                 connection.Close();
@@ -881,7 +897,7 @@ internal abstract class StorageController<T>
                 quantity DOUBLE,
                 first_trade_id BIGINT,
                 last_trade_id BIGINT,
-                transact_time TIMESTAMP,
+                transact_time BIGINT,
                 is_buyer_maker BOOLEAN
             );
             """);
@@ -889,7 +905,7 @@ internal abstract class StorageController<T>
     private static void EnsureBookDepthTable(DuckDBConnection connection, string tableName)
         => ExecuteDuckDbNonQuery(connection, $"""
             CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} (
-                snapshot_time TIMESTAMP,
+                snapshot_time BIGINT,
                 percentage DECIMAL(10,2),
                 depth DOUBLE,
                 notional DOUBLE
@@ -900,11 +916,11 @@ internal abstract class StorageController<T>
     {
         BuildAggTradesStagingTable(connection, csvPath);
 
-        DateTime? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(transact_time) FROM staging_agg_trades_deduped;") switch
+        long? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(transact_time) FROM staging_agg_trades_deduped;") switch
         {
             null => null,
             DBNull => null,
-            object value => Convert.ToDateTime(value)
+            object value => Convert.ToInt64(value)
         };
 
         if (!replaceFrom.HasValue)
@@ -959,11 +975,11 @@ internal abstract class StorageController<T>
     {
         BuildBookDepthStagingTable(connection, csvPath);
 
-        DateTime? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(snapshot_time) FROM staging_book_depth_deduped;") switch
+        long? replaceFrom = ExecuteDuckDbScalar(connection, "SELECT MIN(snapshot_time) FROM staging_book_depth_deduped;") switch
         {
             null => null,
             DBNull => null,
-            object value => Convert.ToDateTime(value)
+            object value => Convert.ToInt64(value)
         };
 
         if (!replaceFrom.HasValue)
@@ -1011,7 +1027,7 @@ internal abstract class StorageController<T>
                 CAST(column2 AS DOUBLE) AS quantity,
                 CAST(column3 AS BIGINT) AS first_trade_id,
                 CAST(column4 AS BIGINT) AS last_trade_id,
-                make_timestamp_ms(CAST(column5 AS BIGINT)) AS transact_time,
+                CAST(column5 AS BIGINT) AS transact_time,
                 CAST(column6 AS BOOLEAN) AS is_buyer_maker
             FROM read_csv({csvLiteral}, header = false, all_varchar = true);
             """);
@@ -1043,7 +1059,7 @@ internal abstract class StorageController<T>
         ExecuteDuckDbNonQuery(connection, $"""
             CREATE TEMP TABLE staging_book_depth AS
             SELECT
-                CAST("timestamp" AS TIMESTAMP) AS snapshot_time,
+                epoch_ms(strptime("timestamp", '%Y-%m-%d %H:%M:%S')) AS snapshot_time,
                 CAST(percentage AS DECIMAL(10,2)) AS percentage,
                 CAST(depth AS DOUBLE) AS depth,
                 CAST(notional AS DOUBLE) AS notional
@@ -1152,16 +1168,69 @@ internal abstract class StorageController<T>
 
     private async Task DeleteOldAggTradesRowsAsync(string databasePath, string tableName, CancellationToken ct)
     {
-        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "transact_time", yearsReserved, ct);
-        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, tableName, "transact_time", null, ct);
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "transact_time", ToAggTradesUnixTime(yearsReserved), ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "transact_time", null, ct);
         if (!latest.HasValue)
             await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
     }
 
+    protected long ToAggTradesUnixTime(DateTime value)
+        => AggTradesTimeUnit switch
+        {
+            AggTradesTimeUnit.Milliseconds => checked((long)(value.ToUniversalTime() - DateTime.UnixEpoch).TotalMilliseconds),
+            AggTradesTimeUnit.Microseconds => checked((value.ToUniversalTime() - DateTime.UnixEpoch).Ticks / 10),
+            _ => throw new NotSupportedException($"Unsupported aggTrades time unit: {AggTradesTimeUnit}."),
+        };
+
+    protected DateTime FromAggTradesUnixTime(long value)
+        => AggTradesTimeUnit switch
+        {
+            AggTradesTimeUnit.Milliseconds => DateTimeOffset.FromUnixTimeMilliseconds(value).UtcDateTime,
+            AggTradesTimeUnit.Microseconds => DateTime.UnixEpoch.AddTicks(checked(value * 10)),
+            _ => throw new NotSupportedException($"Unsupported aggTrades time unit: {AggTradesTimeUnit}."),
+        };
+
+    private void LogUnexpectedAggTradesTimeUnitIfNeeded(string csvPath)
+    {
+        try
+        {
+            string? dataLine = File.ReadLines(csvPath).FirstOrDefault(static line => !string.IsNullOrWhiteSpace(line));
+            if (string.IsNullOrWhiteSpace(dataLine))
+                return;
+
+            string[] columns = dataLine.Split(',');
+            if (columns.Length < 6 || !long.TryParse(columns[5], out long rawTime))
+                return;
+
+            int digitLength = rawTime.ToString().Length;
+            bool matchesExpected = AggTradesTimeUnit switch
+            {
+                AggTradesTimeUnit.Milliseconds => digitLength is >= 13 and <= 14,
+                AggTradesTimeUnit.Microseconds => digitLength is >= 16 and <= 17,
+                _ => true,
+            };
+
+            if (!matchesExpected)
+            {
+                logger.LogWarning(
+                    "Unexpected aggTrades time unit shape. Market: {Market}, ExpectedUnit: {ExpectedUnit}, Digits: {Digits}, CsvPath: {CsvPath}, RawValue: {RawValue}",
+                    MarketPathSegment,
+                    AggTradesTimeUnit,
+                    digitLength,
+                    csvPath,
+                    rawTime);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to inspect aggTrades time unit. Market: {Market}, CsvPath: {CsvPath}", MarketPathSegment, csvPath);
+        }
+    }
+
     private async Task DeleteOldBookDepthRowsAsync(string databasePath, string tableName, CancellationToken ct)
     {
-        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "snapshot_time", yearsReserved, ct);
-        DateTime? latest = await DuckDbStorageHelper.GetMaxDateTimeAsync(databasePath, tableName, "snapshot_time", null, ct);
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "snapshot_time", ToUnixMilliseconds(yearsReserved), ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "snapshot_time", null, ct);
         if (!latest.HasValue)
             await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
     }

@@ -30,6 +30,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     protected override string TakerLongShortRatioPath => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
     protected override string BasisPath => throw new NotSupportedException("Spot market does not support basis.");
     protected override bool IsFutures => false;
+    protected override AggTradesTimeUnit AggTradesTimeUnit => AggTradesTimeUnit.Microseconds;
     protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
 

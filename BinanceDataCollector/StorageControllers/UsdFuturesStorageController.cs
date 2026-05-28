@@ -31,6 +31,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market + ".duckdb"); } }
     protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market + ".duckdb"); } }
     protected override bool IsFutures => true;
+    protected override AggTradesTimeUnit AggTradesTimeUnit => AggTradesTimeUnit.Milliseconds;
     protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
 
