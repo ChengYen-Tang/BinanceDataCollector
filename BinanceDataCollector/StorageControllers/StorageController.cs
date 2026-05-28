@@ -19,6 +19,7 @@ internal enum AggTradesTimeUnit
 internal abstract class StorageController<T>
     where T : class
 {
+    private const long AggTradesMicrosecondsBoundary = 1_000_000_000_000_000L;
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
@@ -520,6 +521,7 @@ internal abstract class StorageController<T>
         await EnsureAggTradesStorageMigratedAsync(batch.Symbol, ct);
         string databasePath = GetAggTradesDatabasePath();
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await EnsureAggTradesStoredTimeNormalizedAsync(databasePath, batch.Symbol);
 
         logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
@@ -640,6 +642,7 @@ internal abstract class StorageController<T>
         if (!File.Exists(databasePath))
             return yearsReserved;
 
+        await EnsureAggTradesStoredTimeNormalizedAsync(databasePath, symbolName);
         long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "transact_time", null, ct);
         return latest.HasValue ? FromAggTradesUnixTime(latest.Value) : yearsReserved;
     }
@@ -841,6 +844,7 @@ internal abstract class StorageController<T>
             await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
             {
                 EnsureAggTradesTable(connection, symbolName);
+                NormalizeAggTradesStoredTimeIfNeeded(connection, symbolName);
                 foreach (string csvPath in csvPaths)
                 {
                     LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
@@ -893,7 +897,7 @@ internal abstract class StorageController<T>
             );
             """);
 
-    private static void ReplaceAggTradesTailFromCsv(DuckDBConnection connection, string tableName, string csvPath)
+    private void ReplaceAggTradesTailFromCsv(DuckDBConnection connection, string tableName, string csvPath)
     {
         BuildAggTradesStagingTable(connection, csvPath);
 
@@ -936,7 +940,7 @@ internal abstract class StorageController<T>
         DropAggTradesStagingTables(connection);
     }
 
-    private static void AppendAggTradesFromCsv(DuckDBConnection connection, string tableName, string csvPath)
+    private void AppendAggTradesFromCsv(DuckDBConnection connection, string tableName, string csvPath)
     {
         BuildAggTradesStagingTable(connection, csvPath);
 
@@ -995,10 +999,17 @@ internal abstract class StorageController<T>
         DropBookDepthStagingTables(connection);
     }
 
-    private static void BuildAggTradesStagingTable(DuckDBConnection connection, string csvPath)
+    private void BuildAggTradesStagingTable(DuckDBConnection connection, string csvPath)
     {
         DropAggTradesStagingTables(connection);
 
+        AggTradesTimeUnit sourceTimeUnit = GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath));
+        string transactTimeExpression = sourceTimeUnit switch
+        {
+            AggTradesTimeUnit.Milliseconds => "CAST(column5 AS BIGINT) * 1000",
+            AggTradesTimeUnit.Microseconds => "CAST(column5 AS BIGINT)",
+            _ => throw new NotSupportedException($"Unsupported aggTrades time unit: {sourceTimeUnit}."),
+        };
         string csvLiteral = ToSqlStringLiteral(csvPath);
         ExecuteDuckDbNonQuery(connection, $"""
             CREATE TEMP TABLE staging_agg_trades AS
@@ -1008,7 +1019,7 @@ internal abstract class StorageController<T>
                 CAST(column2 AS DOUBLE) AS quantity,
                 CAST(column3 AS BIGINT) AS first_trade_id,
                 CAST(column4 AS BIGINT) AS last_trade_id,
-                CAST(column5 AS BIGINT) AS transact_time,
+                {transactTimeExpression} AS transact_time,
                 CAST(column6 AS BOOLEAN) AS is_buyer_maker
             FROM read_csv({csvLiteral}, header = false, all_varchar = true);
             """);
@@ -1122,9 +1133,9 @@ internal abstract class StorageController<T>
             return DateTime.MaxValue;
 
         string period = fileNameWithoutExtension[prefix.Length..];
-        if (DateTime.TryParseExact(period, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
+        if (TryParseMarketDataPeriodAsUtc(period, "yyyy-MM", out DateTime month))
             return month;
-        if (DateTime.TryParseExact(period, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out DateTime day))
+        if (TryParseMarketDataPeriodAsUtc(period, "yyyy-MM-dd", out DateTime day))
             return day;
         return DateTime.MaxValue;
     }
@@ -1132,16 +1143,50 @@ internal abstract class StorageController<T>
     private static DateTime GetMarketDataCsvSortKey(string csvPath)
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(csvPath);
-        int separatorIndex = fileNameWithoutExtension.LastIndexOf('-');
-        if (separatorIndex < 0)
-            return DateTime.MaxValue;
-
-        string period = fileNameWithoutExtension[(fileNameWithoutExtension.LastIndexOf('-', separatorIndex - 1) + 1)..];
-        if (DateTime.TryParseExact(period, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out DateTime month))
+        string period = ExtractMarketDataPeriod(fileNameWithoutExtension);
+        if (TryParseMarketDataPeriodAsUtc(period, "yyyy-MM", out DateTime month))
             return month;
-        if (DateTime.TryParseExact(period, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out DateTime day))
+        if (TryParseMarketDataPeriodAsUtc(period, "yyyy-MM-dd", out DateTime day))
             return day;
         return DateTime.MaxValue;
+    }
+
+    private static string ExtractMarketDataPeriod(string fileNameWithoutExtension)
+    {
+        string[] segments = fileNameWithoutExtension.Split('-');
+        if (segments.Length >= 5
+            && segments[^3].Length == 4
+            && segments[^2].Length == 2
+            && segments[^1].Length == 2)
+        {
+            return $"{segments[^3]}-{segments[^2]}-{segments[^1]}";
+        }
+
+        if (segments.Length >= 4
+            && segments[^2].Length == 4
+            && segments[^1].Length == 2)
+        {
+            return $"{segments[^2]}-{segments[^1]}";
+        }
+
+        return string.Empty;
+    }
+
+    private static bool TryParseMarketDataPeriodAsUtc(string value, string format, out DateTime parsed)
+    {
+        if (DateTime.TryParseExact(
+            value,
+            format,
+            null,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out parsed))
+        {
+            parsed = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            return true;
+        }
+
+        parsed = default;
+        return false;
     }
 
     private static string ToSqlStringLiteral(string value)
@@ -1149,27 +1194,54 @@ internal abstract class StorageController<T>
 
     private async Task DeleteOldAggTradesRowsAsync(string databasePath, string tableName, CancellationToken ct)
     {
-        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "transact_time", ToAggTradesUnixTime(yearsReserved), ct);
+        await EnsureAggTradesStoredTimeNormalizedAsync(databasePath, tableName);
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(
+            databasePath,
+            tableName,
+            "transact_time",
+            ToAggTradesUnixTime(yearsReserved),
+            ct);
+
         long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "transact_time", null, ct);
         if (!latest.HasValue)
             await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
     }
 
-    protected long ToAggTradesUnixTime(DateTime value)
-        => AggTradesTimeUnit switch
+    private async Task EnsureAggTradesStoredTimeNormalizedAsync(string databasePath, string tableName)
+    {
+        if (!File.Exists(databasePath))
+            return;
+
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(databasePath, connection =>
         {
-            AggTradesTimeUnit.Milliseconds => checked((long)(value.ToUniversalTime() - DateTime.UnixEpoch).TotalMilliseconds),
-            AggTradesTimeUnit.Microseconds => checked((value.ToUniversalTime() - DateTime.UnixEpoch).Ticks / 10),
-            _ => throw new NotSupportedException($"Unsupported aggTrades time unit: {AggTradesTimeUnit}."),
-        };
+            NormalizeAggTradesStoredTimeIfNeeded(connection, tableName);
+            return Task.CompletedTask;
+        });
+    }
+
+    private static void NormalizeAggTradesStoredTimeIfNeeded(DuckDBConnection connection, string tableName)
+    {
+        if (!DuckDbTableExists(connection, tableName))
+            return;
+
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            UPDATE {QuoteIdentifier(tableName)}
+            SET transact_time = transact_time * 1000
+            WHERE transact_time < $microseconds_boundary;
+            """;
+        command.Parameters.Add(new DuckDBParameter("microseconds_boundary", AggTradesMicrosecondsBoundary));
+        command.ExecuteNonQuery();
+    }
+
+    protected virtual AggTradesTimeUnit GetAggTradesTimeUnitForTimestamp(DateTime timestamp)
+        => AggTradesTimeUnit;
+
+    protected long ToAggTradesUnixTime(DateTime value)
+        => checked((value.ToUniversalTime() - DateTime.UnixEpoch).Ticks / 10);
 
     protected DateTime FromAggTradesUnixTime(long value)
-        => AggTradesTimeUnit switch
-        {
-            AggTradesTimeUnit.Milliseconds => DateTimeOffset.FromUnixTimeMilliseconds(value).UtcDateTime,
-            AggTradesTimeUnit.Microseconds => DateTime.UnixEpoch.AddTicks(checked(value * 10)),
-            _ => throw new NotSupportedException($"Unsupported aggTrades time unit: {AggTradesTimeUnit}."),
-        };
+        => DateTime.UnixEpoch.AddTicks(checked(value * 10));
 
     private void LogUnexpectedAggTradesTimeUnitIfNeeded(string csvPath)
     {
@@ -1183,8 +1255,10 @@ internal abstract class StorageController<T>
             if (columns.Length < 6 || !long.TryParse(columns[5], out long rawTime))
                 return;
 
-            int digitLength = rawTime.ToString().Length;
-            bool matchesExpected = AggTradesTimeUnit switch
+            DateTime csvPeriodStart = GetMarketDataCsvSortKey(csvPath);
+            AggTradesTimeUnit expectedTimeUnit = GetAggTradesTimeUnitForTimestamp(csvPeriodStart);
+            int digitLength = rawTime.ToString().TrimStart('-').Length;
+            bool matchesExpected = expectedTimeUnit switch
             {
                 AggTradesTimeUnit.Milliseconds => digitLength is >= 13 and <= 14,
                 AggTradesTimeUnit.Microseconds => digitLength is >= 16 and <= 17,
@@ -1196,7 +1270,7 @@ internal abstract class StorageController<T>
                 logger.LogWarning(
                     "Unexpected aggTrades time unit shape. Market: {Market}, ExpectedUnit: {ExpectedUnit}, Digits: {Digits}, CsvPath: {CsvPath}, RawValue: {RawValue}",
                     MarketPathSegment,
-                    AggTradesTimeUnit,
+                    expectedTimeUnit,
                     digitLength,
                     csvPath,
                     rawTime);
@@ -1218,6 +1292,18 @@ internal abstract class StorageController<T>
 
     private static string QuoteIdentifier(string value)
         => "\"" + value.Replace("\"", "\"\"") + "\"";
+
+    private static bool DuckDbTableExists(DuckDBConnection connection, string tableName)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_name = $table_name;
+            """;
+        command.Parameters.Add(new DuckDBParameter("table_name", tableName));
+        return Convert.ToInt32(command.ExecuteScalar()) > 0;
+    }
 
     private string GetMarketDataMarketPath(string dataType)
         => Path.Combine(MarketDataPath, dataType, MarketPathSegment);

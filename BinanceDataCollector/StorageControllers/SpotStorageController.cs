@@ -10,6 +10,7 @@ namespace BinanceDataCollector.StorageControllers;
 internal class SpotStorageController : StorageController<SymbolInfoCsv>
 {
     private const string Market = "Spot";
+    private static readonly DateTime SpotAggTradesMicrosecondsStart = new(2025, 01, 01, 0, 0, 0, DateTimeKind.Utc);
     private readonly Spot spot;
     private readonly SpotMarketData spotMarketData;
 
@@ -33,6 +34,11 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     protected override AggTradesTimeUnit AggTradesTimeUnit => AggTradesTimeUnit.Microseconds;
     protected override string GetSymbolName(SymbolInfoCsv symbol)
         => symbol.Name;
+
+    protected override AggTradesTimeUnit GetAggTradesTimeUnitForTimestamp(DateTime timestamp)
+        => timestamp.ToUniversalTime() >= SpotAggTradesMicrosecondsStart
+            ? AggTradesTimeUnit.Microseconds
+            : AggTradesTimeUnit.Milliseconds;
 
     protected override Task<List<string>> GetExistingSymbolNamesAsync(CancellationToken ct = default)
         => GetStoredSymbolNamesAsync(ct);
