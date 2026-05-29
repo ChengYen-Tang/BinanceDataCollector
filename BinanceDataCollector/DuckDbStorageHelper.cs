@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
+using System.Threading;
 
 namespace BinanceDataCollector;
 
@@ -15,16 +16,12 @@ internal static class DuckDbStorageHelper
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-    private static readonly ConcurrentDictionary<string, DuckDBConnection> ConnectionCache = new(PathComparer);
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(PathComparer);
-    private static readonly object LifecycleSync = new();
+    private static readonly ConcurrentDictionary<DbTableLockKey, SemaphoreSlim> TableLocks = new(new DbTableLockKeyComparer());
+    private static readonly Lock LifecycleSync = new();
     private static readonly ManualResetEventSlim NoActiveOperations = new(initialState: true);
-    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<List<AggTradeImportRow>> AggTradeBatchPool = PooledObjectHelper.GetListPool<AggTradeImportRow>(MarketDataImportBatchSize);
-    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<Dictionary<long, AggTradeImportRow>> AggTradeDedupPool = PooledObjectHelper.GetDictionaryPool<long, AggTradeImportRow>(MarketDataImportBatchSize);
-    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<List<BookDepthImportRow>> BookDepthBatchPool = PooledObjectHelper.GetListPool<BookDepthImportRow>(MarketDataImportBatchSize);
-    private static readonly Microsoft.Extensions.ObjectPool.ObjectPool<Dictionary<BookDepthRowKey, BookDepthImportRow>> BookDepthDedupPool = PooledObjectHelper.GetDictionaryPool<BookDepthRowKey, BookDepthImportRow>(MarketDataImportBatchSize);
     private static int activeOperations;
     private static bool isClosing;
+    private static long tempTableId;
 
     public static Task ReplaceTableAsync<T>(string dbPath, string tableName, IEnumerable<T> records, CancellationToken ct = default)
         => ReplaceTableAsync(dbPath, tableName, records, null, false, ct);
@@ -37,16 +34,16 @@ internal static class DuckDbStorageHelper
         bool recreateTable,
         CancellationToken ct = default)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the table gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
 
             List<T> recordList = [.. records];
             PropertyInfo[] properties = GetPersistedProperties(typeof(T));
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             using DuckDBTransaction transaction = connection.BeginTransaction();
 
             if (recreateTable)
@@ -71,10 +68,10 @@ internal static class DuckDbStorageHelper
 
     public static async Task UpsertRowsAsync<T>(string dbPath, string tableName, IEnumerable<T> records, string keyColumn, CancellationToken ct = default)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the table gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
 
@@ -86,7 +83,7 @@ internal static class DuckDbStorageHelper
             PropertyInfo keyProperty = properties.FirstOrDefault(property => property.Name == keyColumn)
                 ?? throw new InvalidOperationException($"Key column '{keyColumn}' was not found on type '{typeof(T).FullName}'.");
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             using DuckDBTransaction transaction = connection.BeginTransaction();
 
             await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
@@ -112,12 +109,12 @@ internal static class DuckDbStorageHelper
 
     public static async Task<List<string>> GetStringValuesAsync(string dbPath, string tableName, string columnName, CancellationToken ct = default)
     {
-        return await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        return await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
                 return [];
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             if (!await TableExistsAsync(connection, tableName, ct))
                 return [];
 
@@ -143,12 +140,12 @@ internal static class DuckDbStorageHelper
         IReadOnlyDictionary<string, object?>? filters = null,
         CancellationToken ct = default)
     {
-        return await WithConnectionLockAsync<DateTime?>(dbPath, async normalizedPath =>
+        return await WithTableLockAsync<DateTime?>(dbPath, tableName, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
                 return null;
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             if (!await TableExistsAsync(connection, tableName, ct))
                 return null;
 
@@ -176,12 +173,12 @@ internal static class DuckDbStorageHelper
         IReadOnlyDictionary<string, object?>? filters = null,
         CancellationToken ct = default)
     {
-        return await WithConnectionLockAsync<long?>(dbPath, async normalizedPath =>
+        return await WithTableLockAsync<long?>(dbPath, tableName, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
                 return null;
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             if (!await TableExistsAsync(connection, tableName, ct))
                 return null;
 
@@ -199,15 +196,15 @@ internal static class DuckDbStorageHelper
 
     public static async Task DeleteRowsBeforeAsync(string dbPath, string tableName, string columnName, DateTime threshold, CancellationToken ct = default)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the table gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
                 return;
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             if (!await TableExistsAsync(connection, tableName, ct))
                 return;
 
@@ -223,15 +220,15 @@ internal static class DuckDbStorageHelper
 
     public static async Task DeleteRowsBeforeAsync(string dbPath, string tableName, string columnName, long threshold, CancellationToken ct = default)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the table gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
                 return;
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             if (!await TableExistsAsync(connection, tableName, ct))
                 return;
 
@@ -247,15 +244,15 @@ internal static class DuckDbStorageHelper
 
     public static async Task DropTableIfExistsAsync(string dbPath, string tableName, CancellationToken ct = default)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the table gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             if (!File.Exists(normalizedPath))
                 return;
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             using DuckDBCommand command = connection.CreateCommand();
             command.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
             await command.ExecuteNonQueryAsync(ct);
@@ -266,20 +263,20 @@ internal static class DuckDbStorageHelper
         string dbPath,
         Func<DuckDBConnection, Task> action)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the operation gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        return WithConnectionLockAsync(dbPath, normalizedPath => action(GetOpenConnection(normalizedPath)));
+        return WithConnectionAsync(dbPath, action);
     }
 
     public static Task<T> ExecuteWithConnectionAsync<T>(
         string dbPath,
         Func<DuckDBConnection, Task<T>> action)
     {
-        // Intentionally do not pass the caller token into the connection gate.
+        // Intentionally do not pass the caller token into the operation gate.
         // Once a write/delete operation is enqueued, it must wait its turn and
         // finish consistently rather than abandoning the mutation mid-pipeline.
-        return WithConnectionLockAsync(dbPath, normalizedPath => action(GetOpenConnection(normalizedPath)));
+        return WithConnectionAsync(dbPath, action);
     }
 
     public static async Task ReplaceAggTradesTailFromCsvAsync(
@@ -289,10 +286,10 @@ internal static class DuckDbStorageHelper
         bool sourceIsMicroseconds,
         CancellationToken ct = default)
     {
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
             ImportAggTradesCsv(connection, tableName, csvPath, sourceIsMicroseconds, replaceTail: true);
             await Task.CompletedTask;
@@ -306,10 +303,10 @@ internal static class DuckDbStorageHelper
         bool sourceIsMicroseconds,
         CancellationToken ct = default)
     {
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
             ImportAggTradesCsv(connection, tableName, csvPath, sourceIsMicroseconds, replaceTail: false);
             await Task.CompletedTask;
@@ -322,10 +319,10 @@ internal static class DuckDbStorageHelper
         string csvPath,
         CancellationToken ct = default)
     {
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureBookDepthTable(connection, tableName);
             ImportBookDepthCsv(connection, tableName, csvPath);
             await Task.CompletedTask;
@@ -334,13 +331,12 @@ internal static class DuckDbStorageHelper
 
     public static async Task CheckpointAsync(string dbPath, CancellationToken ct = default)
     {
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithConnectionAsync(dbPath, async connection =>
         {
             ct.ThrowIfCancellationRequested();
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
             ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
             await Task.CompletedTask;
-        });
+        }, ct);
     }
 
     public static async Task NormalizeAggTradesStoredTimeAsync(
@@ -349,13 +345,13 @@ internal static class DuckDbStorageHelper
         long microsecondsBoundary,
         CancellationToken ct = default)
     {
-        await WithConnectionLockAsync(dbPath, async normalizedPath =>
+        await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
             if (!File.Exists(normalizedPath))
                 return;
 
-            DuckDBConnection connection = GetOpenConnection(normalizedPath);
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
             if (!TableExists(connection, tableName))
                 return;
 
@@ -382,19 +378,6 @@ internal static class DuckDbStorageHelper
 
         NoActiveOperations.Wait();
 
-        foreach ((string _, DuckDBConnection connection) in ConnectionCache)
-        {
-            try
-            {
-                connection.Dispose();
-            }
-            catch
-            {
-            }
-        }
-
-        ConnectionCache.Clear();
-
         lock (LifecycleSync)
         {
             isClosing = false;
@@ -402,25 +385,24 @@ internal static class DuckDbStorageHelper
         }
     }
 
-    private static DuckDBConnection GetOpenConnection(string normalizedPath)
-        => ConnectionCache.GetOrAdd(normalizedPath, static path =>
-        {
-            string? directoryPath = Path.GetDirectoryName(path);
-            if (!string.IsNullOrWhiteSpace(directoryPath))
-                Directory.CreateDirectory(directoryPath);
+    private static DuckDBConnection OpenConnection(string normalizedPath)
+    {
+        string? directoryPath = Path.GetDirectoryName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+            Directory.CreateDirectory(directoryPath);
 
-            DuckDBConnection connection = new($"Data Source={path}");
-            connection.Open();
-            return connection;
-        });
+        DuckDBConnection connection = new($"Data Source={normalizedPath}");
+        connection.Open();
+        return connection;
+    }
 
-    private static async Task WithConnectionLockAsync(string dbPath, Func<string, Task> action, CancellationToken ct = default)
+    private static async Task WithTableLockAsync(string dbPath, string tableName, Func<string, Task> action, CancellationToken ct = default)
     {
         string normalizedPath = Path.GetFullPath(dbPath);
         await EnterOperationAsync(ct);
         try
         {
-            SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
+            SemaphoreSlim gate = TableLocks.GetOrAdd(new DbTableLockKey(normalizedPath, tableName), static _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(ct);
             try
             {
@@ -437,13 +419,13 @@ internal static class DuckDbStorageHelper
         }
     }
 
-    private static async Task<T> WithConnectionLockAsync<T>(string dbPath, Func<string, Task<T>> action, CancellationToken ct = default)
+    private static async Task<T> WithTableLockAsync<T>(string dbPath, string tableName, Func<string, Task<T>> action, CancellationToken ct = default)
     {
         string normalizedPath = Path.GetFullPath(dbPath);
         await EnterOperationAsync(ct);
         try
         {
-            SemaphoreSlim gate = ConnectionLocks.GetOrAdd(normalizedPath, static _ => new SemaphoreSlim(1, 1));
+            SemaphoreSlim gate = TableLocks.GetOrAdd(new DbTableLockKey(normalizedPath, tableName), static _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(ct);
             try
             {
@@ -453,6 +435,36 @@ internal static class DuckDbStorageHelper
             {
                 gate.Release();
             }
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    private static async Task WithConnectionAsync(string dbPath, Func<DuckDBConnection, Task> action, CancellationToken ct = default)
+    {
+        string normalizedPath = Path.GetFullPath(dbPath);
+        await EnterOperationAsync(ct);
+        try
+        {
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
+            await action(connection);
+        }
+        finally
+        {
+            ExitOperation();
+        }
+    }
+
+    private static async Task<T> WithConnectionAsync<T>(string dbPath, Func<DuckDBConnection, Task<T>> action, CancellationToken ct = default)
+    {
+        string normalizedPath = Path.GetFullPath(dbPath);
+        await EnterOperationAsync(ct);
+        try
+        {
+            using DuckDBConnection connection = OpenConnection(normalizedPath);
+            return await action(connection);
         }
         finally
         {
@@ -566,9 +578,9 @@ internal static class DuckDbStorageHelper
         bool sourceIsMicroseconds,
         bool replaceTail)
     {
-        EnsureAggTradesBatchTables(connection);
-        List<AggTradeImportRow> batchRows = AggTradeBatchPool.Get();
-        Dictionary<long, AggTradeImportRow> batchDedup = AggTradeDedupPool.Get();
+        BatchTempTables tempTables = CreateAggTradesBatchTables(connection);
+        List<AggTradeImportRow> batchRows = PooledObjectHelper.RentList<AggTradeImportRow>(MarketDataImportBatchSize);
+        Dictionary<long, AggTradeImportRow> batchDedup = PooledObjectHelper.RentDictionary<long, AggTradeImportRow>(MarketDataImportBatchSize);
         bool tailDeleted = !replaceTail;
         long replaceFrom = replaceTail
             ? GetAggTradesCsvMinTimestamp(csvPath, sourceIsMicroseconds)
@@ -585,25 +597,24 @@ internal static class DuckDbStorageHelper
                 AggTradeImportRow row = ParseAggTrade(line.AsSpan(), sourceIsMicroseconds);
                 batchDedup[row.ParquetAggTradeId] = row;
                 if (batchDedup.Count >= MarketDataImportBatchSize)
-                    FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+                    FlushAggTradeBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
             }
 
-            FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+            FlushAggTradeBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
         }
         finally
         {
-            batchRows.Clear();
-            AggTradeBatchPool.Return(batchRows);
-            batchDedup.Clear();
-            AggTradeDedupPool.Return(batchDedup);
+            DropBatchTempTables(connection, tempTables);
+            PooledObjectHelper.ReturnList(batchRows, MarketDataImportBatchSize);
+            PooledObjectHelper.ReturnDictionary(batchDedup, MarketDataImportBatchSize);
         }
     }
 
     private static void ImportBookDepthCsv(DuckDBConnection connection, string tableName, string csvPath)
     {
-        EnsureBookDepthBatchTables(connection);
-        List<BookDepthImportRow> batchRows = BookDepthBatchPool.Get();
-        Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup = BookDepthDedupPool.Get();
+        BatchTempTables tempTables = CreateBookDepthBatchTables(connection);
+        List<BookDepthImportRow> batchRows = PooledObjectHelper.RentList<BookDepthImportRow>(MarketDataImportBatchSize);
+        Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup = PooledObjectHelper.RentDictionary<BookDepthRowKey, BookDepthImportRow>(MarketDataImportBatchSize);
         bool tailDeleted = false;
         long replaceFrom = GetBookDepthCsvMinTimestamp(csvPath);
 
@@ -625,23 +636,23 @@ internal static class DuckDbStorageHelper
                 BookDepthImportRow row = ParseBookDepth(line.AsSpan());
                 batchDedup[new BookDepthRowKey(row.SnapshotTime, row.Percentage)] = row;
                 if (batchDedup.Count >= MarketDataImportBatchSize)
-                    FlushBookDepthBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+                    FlushBookDepthBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
             }
 
-            FlushBookDepthBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+            FlushBookDepthBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
         }
         finally
         {
-            batchRows.Clear();
-            BookDepthBatchPool.Return(batchRows);
-            batchDedup.Clear();
-            BookDepthDedupPool.Return(batchDedup);
+            DropBatchTempTables(connection, tempTables);
+            PooledObjectHelper.ReturnList(batchRows, MarketDataImportBatchSize);
+            PooledObjectHelper.ReturnDictionary(batchDedup, MarketDataImportBatchSize);
         }
     }
 
     private static void FlushAggTradeBatch(
         DuckDBConnection connection,
         string tableName,
+        BatchTempTables tempTables,
         List<AggTradeImportRow> batchRows,
         Dictionary<long, AggTradeImportRow> batchDedup,
         ref bool tailDeleted,
@@ -669,9 +680,9 @@ internal static class DuckDbStorageHelper
             tailDeleted = true;
         }
 
-        ClearAggTradesBatchTables(connection, transaction);
-        using (DuckDBCommand insertRowCommand = CreateAggTradesBatchRowInsertCommand(connection, transaction))
-        using (DuckDBCommand insertKeyCommand = CreateAggTradesBatchKeyInsertCommand(connection, transaction))
+        ClearBatchTables(connection, transaction, tempTables);
+        using (DuckDBCommand insertRowCommand = CreateAggTradesBatchRowInsertCommand(connection, transaction, tempTables.RowsTableName))
+        using (DuckDBCommand insertKeyCommand = CreateAggTradesBatchKeyInsertCommand(connection, transaction, tempTables.KeysTableName))
         {
             foreach (AggTradeImportRow row in batchRows)
             {
@@ -687,8 +698,8 @@ internal static class DuckDbStorageHelper
             deleteByKeyCommand.Transaction = transaction;
             deleteByKeyCommand.CommandText = $"""
                 DELETE FROM {QuoteIdentifier(tableName)}
-                USING temp_agg_trades_batch_keys
-                WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = temp_agg_trades_batch_keys.parquetagg_trade_id;
+                USING {QuoteIdentifier(tempTables.KeysTableName)}
+                WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = {QuoteIdentifier(tempTables.KeysTableName)}.parquetagg_trade_id;
                 """;
             deleteByKeyCommand.ExecuteNonQuery();
         }
@@ -699,7 +710,7 @@ internal static class DuckDbStorageHelper
             insertCommand.CommandText = $"""
                 INSERT INTO {QuoteIdentifier(tableName)}
                 SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
-                FROM temp_agg_trades_batch_rows
+                FROM {QuoteIdentifier(tempTables.RowsTableName)}
                 ORDER BY transact_time, parquetagg_trade_id;
                 """;
             insertCommand.ExecuteNonQuery();
@@ -713,6 +724,7 @@ internal static class DuckDbStorageHelper
     private static void FlushBookDepthBatch(
         DuckDBConnection connection,
         string tableName,
+        BatchTempTables tempTables,
         List<BookDepthImportRow> batchRows,
         Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup,
         ref bool tailDeleted,
@@ -740,9 +752,9 @@ internal static class DuckDbStorageHelper
             tailDeleted = true;
         }
 
-        ClearBookDepthBatchTables(connection, transaction);
-        using (DuckDBCommand insertRowCommand = CreateBookDepthBatchRowInsertCommand(connection, transaction))
-        using (DuckDBCommand insertKeyCommand = CreateBookDepthBatchKeyInsertCommand(connection, transaction))
+        ClearBatchTables(connection, transaction, tempTables);
+        using (DuckDBCommand insertRowCommand = CreateBookDepthBatchRowInsertCommand(connection, transaction, tempTables.RowsTableName))
+        using (DuckDBCommand insertKeyCommand = CreateBookDepthBatchKeyInsertCommand(connection, transaction, tempTables.KeysTableName))
         {
             foreach (BookDepthImportRow row in batchRows)
             {
@@ -759,9 +771,9 @@ internal static class DuckDbStorageHelper
             deleteByKeyCommand.Transaction = transaction;
             deleteByKeyCommand.CommandText = $"""
                 DELETE FROM {QuoteIdentifier(tableName)}
-                USING temp_book_depth_batch_keys
-                WHERE {QuoteIdentifier(tableName)}.snapshot_time = temp_book_depth_batch_keys.snapshot_time
-                  AND {QuoteIdentifier(tableName)}.percentage = temp_book_depth_batch_keys.percentage;
+                USING {QuoteIdentifier(tempTables.KeysTableName)}
+                WHERE {QuoteIdentifier(tableName)}.snapshot_time = {QuoteIdentifier(tempTables.KeysTableName)}.snapshot_time
+                  AND {QuoteIdentifier(tableName)}.percentage = {QuoteIdentifier(tempTables.KeysTableName)}.percentage;
                 """;
             deleteByKeyCommand.ExecuteNonQuery();
         }
@@ -772,7 +784,7 @@ internal static class DuckDbStorageHelper
             insertCommand.CommandText = $"""
                 INSERT INTO {QuoteIdentifier(tableName)}
                 SELECT snapshot_time, percentage, depth, notional
-                FROM temp_book_depth_batch_rows
+                FROM {QuoteIdentifier(tempTables.RowsTableName)}
                 ORDER BY snapshot_time, percentage;
                 """;
             insertCommand.ExecuteNonQuery();
@@ -783,9 +795,11 @@ internal static class DuckDbStorageHelper
         batchRows.Clear();
     }
 
-    private static void EnsureAggTradesBatchTables(DuckDBConnection connection)
-        => ExecuteDuckDbNonQuery(connection, """
-            CREATE TEMP TABLE IF NOT EXISTS temp_agg_trades_batch_rows (
+    private static BatchTempTables CreateAggTradesBatchTables(DuckDBConnection connection)
+    {
+        BatchTempTables tempTables = CreateBatchTempTables("temp_agg_trades_batch");
+        ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TEMP TABLE {QuoteIdentifier(tempTables.RowsTableName)} (
                 parquetagg_trade_id BIGINT,
                 price DOUBLE,
                 quantity DOUBLE,
@@ -794,53 +808,62 @@ internal static class DuckDbStorageHelper
                 transact_time BIGINT,
                 is_buyer_maker BOOLEAN
             );
-            CREATE TEMP TABLE IF NOT EXISTS temp_agg_trades_batch_keys (
+            CREATE TEMP TABLE {QuoteIdentifier(tempTables.KeysTableName)} (
                 parquetagg_trade_id BIGINT
             );
             """);
 
-    private static void EnsureBookDepthBatchTables(DuckDBConnection connection)
-        => ExecuteDuckDbNonQuery(connection, """
-            CREATE TEMP TABLE IF NOT EXISTS temp_book_depth_batch_rows (
+        return tempTables;
+    }
+
+    private static BatchTempTables CreateBookDepthBatchTables(DuckDBConnection connection)
+    {
+        BatchTempTables tempTables = CreateBatchTempTables("temp_book_depth_batch");
+        ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TEMP TABLE {QuoteIdentifier(tempTables.RowsTableName)} (
                 snapshot_time BIGINT,
                 percentage DECIMAL(10,2),
                 depth DOUBLE,
                 notional DOUBLE
             );
-            CREATE TEMP TABLE IF NOT EXISTS temp_book_depth_batch_keys (
+            CREATE TEMP TABLE {QuoteIdentifier(tempTables.KeysTableName)} (
                 snapshot_time BIGINT,
                 percentage DECIMAL(10,2)
             );
             """);
 
-    private static void ClearAggTradesBatchTables(DuckDBConnection connection, DuckDBTransaction transaction)
+        return tempTables;
+    }
+
+    private static BatchTempTables CreateBatchTempTables(string prefix)
+    {
+        long id = Interlocked.Increment(ref tempTableId);
+        return new($"{prefix}_{id}_rows", $"{prefix}_{id}_keys");
+    }
+
+    private static void ClearBatchTables(DuckDBConnection connection, DuckDBTransaction transaction, BatchTempTables tempTables)
     {
         using DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            DELETE FROM temp_agg_trades_batch_rows;
-            DELETE FROM temp_agg_trades_batch_keys;
+        command.CommandText = $"""
+            DELETE FROM {QuoteIdentifier(tempTables.RowsTableName)};
+            DELETE FROM {QuoteIdentifier(tempTables.KeysTableName)};
             """;
         command.ExecuteNonQuery();
     }
 
-    private static void ClearBookDepthBatchTables(DuckDBConnection connection, DuckDBTransaction transaction)
-    {
-        using DuckDBCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            DELETE FROM temp_book_depth_batch_rows;
-            DELETE FROM temp_book_depth_batch_keys;
-            """;
-        command.ExecuteNonQuery();
-    }
+    private static void DropBatchTempTables(DuckDBConnection connection, BatchTempTables tempTables)
+        => ExecuteDuckDbNonQuery(connection, $"""
+            DROP TABLE IF EXISTS {QuoteIdentifier(tempTables.RowsTableName)};
+            DROP TABLE IF EXISTS {QuoteIdentifier(tempTables.KeysTableName)};
+            """);
 
-    private static DuckDBCommand CreateAggTradesBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    private static DuckDBCommand CreateAggTradesBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string rowsTableName)
     {
         DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO temp_agg_trades_batch_rows
+        command.CommandText = $"""
+            INSERT INTO {QuoteIdentifier(rowsTableName)}
             VALUES ($parquetagg_trade_id, $price, $quantity, $first_trade_id, $last_trade_id, $transact_time, $is_buyer_maker);
             """;
         command.Parameters.Add(new DuckDBParameter { ParameterName = "parquetagg_trade_id", DbType = DbType.Int64 });
@@ -853,24 +876,24 @@ internal static class DuckDbStorageHelper
         return command;
     }
 
-    private static DuckDBCommand CreateAggTradesBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    private static DuckDBCommand CreateAggTradesBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string keysTableName)
     {
         DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO temp_agg_trades_batch_keys
+        command.CommandText = $"""
+            INSERT INTO {QuoteIdentifier(keysTableName)}
             VALUES ($parquetagg_trade_id);
             """;
         command.Parameters.Add(new DuckDBParameter { ParameterName = "parquetagg_trade_id", DbType = DbType.Int64 });
         return command;
     }
 
-    private static DuckDBCommand CreateBookDepthBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    private static DuckDBCommand CreateBookDepthBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string rowsTableName)
     {
         DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO temp_book_depth_batch_rows
+        command.CommandText = $"""
+            INSERT INTO {QuoteIdentifier(rowsTableName)}
             VALUES ($snapshot_time, $percentage, $depth, $notional);
             """;
         command.Parameters.Add(new DuckDBParameter { ParameterName = "snapshot_time", DbType = DbType.Int64 });
@@ -880,12 +903,12 @@ internal static class DuckDbStorageHelper
         return command;
     }
 
-    private static DuckDBCommand CreateBookDepthBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction)
+    private static DuckDBCommand CreateBookDepthBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string keysTableName)
     {
         DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO temp_book_depth_batch_keys
+        command.CommandText = $"""
+            INSERT INTO {QuoteIdentifier(keysTableName)}
             VALUES ($snapshot_time, $percentage);
             """;
         command.Parameters.Add(new DuckDBParameter { ParameterName = "snapshot_time", DbType = DbType.Int64 });
@@ -1204,5 +1227,19 @@ internal static class DuckDbStorageHelper
 
     private static string QuoteIdentifier(string identifier)
         => "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+
+    private readonly record struct DbTableLockKey(string NormalizedPath, string TableName);
+
+    private readonly record struct BatchTempTables(string RowsTableName, string KeysTableName);
+
+    private sealed class DbTableLockKeyComparer : IEqualityComparer<DbTableLockKey>
+    {
+        public bool Equals(DbTableLockKey x, DbTableLockKey y)
+            => PathComparer.Equals(x.NormalizedPath, y.NormalizedPath)
+                && StringComparer.Ordinal.Equals(x.TableName, y.TableName);
+
+        public int GetHashCode(DbTableLockKey obj)
+            => HashCode.Combine(PathComparer.GetHashCode(obj.NormalizedPath), StringComparer.Ordinal.GetHashCode(obj.TableName));
+    }
 
 }

@@ -10,7 +10,7 @@ internal static class PooledObjectHelper
     private static readonly ConcurrentDictionary<(Type ItemType, int InitialCapacity), object> ListPools = [];
     private static readonly ConcurrentDictionary<(Type KeyType, Type ValueType, int InitialCapacity), object> DictionaryPools = [];
 
-    public static ObjectPool<List<T>> GetListPool<T>(int initialCapacity)
+    private static ObjectPool<List<T>> GetListPool<T>(int initialCapacity)
         => (ObjectPool<List<T>>)ListPools.GetOrAdd(
             (typeof(T), NormalizeInitialCapacity(initialCapacity)),
             static key => PoolProvider.Create(new PooledListPolicy<T>(key.InitialCapacity)));
@@ -21,11 +21,19 @@ internal static class PooledObjectHelper
     public static void ReturnList<T>(List<T> rows, int initialCapacity)
         => GetListPool<T>(initialCapacity).Return(rows);
 
-    public static ObjectPool<Dictionary<TKey, TValue>> GetDictionaryPool<TKey, TValue>(int initialCapacity)
+    private static ObjectPool<Dictionary<TKey, TValue>> GetDictionaryPool<TKey, TValue>(int initialCapacity)
         where TKey : notnull
         => (ObjectPool<Dictionary<TKey, TValue>>)DictionaryPools.GetOrAdd(
             (typeof(TKey), typeof(TValue), NormalizeInitialCapacity(initialCapacity)),
             static key => PoolProvider.Create(new PooledDictionaryPolicy<TKey, TValue>(key.InitialCapacity)));
+
+    public static Dictionary<TKey, TValue> RentDictionary<TKey, TValue>(int initialCapacity)
+        where TKey : notnull
+        => GetDictionaryPool<TKey, TValue>(initialCapacity).Get();
+
+    public static void ReturnDictionary<TKey, TValue>(Dictionary<TKey, TValue> dictionary, int initialCapacity)
+        where TKey : notnull
+        => GetDictionaryPool<TKey, TValue>(initialCapacity).Return(dictionary);
 
     private static int NormalizeInitialCapacity(int requestedCapacity)
     {

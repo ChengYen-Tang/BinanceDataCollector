@@ -1,7 +1,6 @@
 using CollectorModels.Models.Storage;
 using DuckDB.NET.Data;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Text.Json;
 
 namespace BinanceDataCollector.Tests;
@@ -653,7 +652,7 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
-    public async Task ReplaceTableAsync_WhenInitialOpenFails_DoesNotPoisonConnectionCache()
+    public async Task ReplaceTableAsync_WhenInitialOpenFails_DoesNotPoisonFutureConnections()
     {
         string dbPath = CreateDbPath();
         Directory.CreateDirectory(dbPath);
@@ -803,7 +802,7 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
-    public async Task ExecuteWithConnectionAsync_WhenSamePathIsUsedConcurrently_ReusesSingleConnectionInstance()
+    public async Task ExecuteWithConnectionAsync_WhenSamePathIsUsedConcurrently_UsesIndependentConnections()
     {
         string dbPath = CreateDbPath();
         ConcurrentDictionary<int, byte> connectionIds = [];
@@ -820,15 +819,16 @@ public sealed class DuckDbStorageHelperTests
 
         await Task.WhenAll(tasks);
 
-        Assert.AreEqual(1, connectionIds.Count);
+        Assert.IsGreaterThan(1, connectionIds.Count);
     }
 
     [TestMethod]
-    public async Task ExecuteWithConnectionAsync_WhenSamePathIsUsedConcurrently_SerializesCallbacks()
+    public async Task ExecuteWithConnectionAsync_WhenSamePathIsUsedConcurrently_AllowsConcurrentCallbacks()
     {
         string dbPath = CreateDbPath();
         int concurrentCallbacks = 0;
         int observedMaxConcurrency = 0;
+        using ManualResetEventSlim releaseCallbacks = new(false);
 
         Task[] tasks = Enumerable.Range(0, 8)
             .Select(_ => Task.Run(() => DuckDbStorageHelper.ExecuteWithConnectionAsync(
@@ -845,14 +845,16 @@ public sealed class DuckDbStorageHelperTests
                     }
                     while (Interlocked.CompareExchange(ref observedMaxConcurrency, current, snapshotMax) != snapshotMax);
 
-                    await Task.Delay(10);
+                    releaseCallbacks.Wait(TimeSpan.FromSeconds(5));
                     Interlocked.Decrement(ref concurrentCallbacks);
                 })))
             .ToArray();
 
+        SpinWait.SpinUntil(() => Volatile.Read(ref concurrentCallbacks) >= 2, TimeSpan.FromSeconds(5));
+        releaseCallbacks.Set();
         await Task.WhenAll(tasks);
 
-        Assert.AreEqual(1, observedMaxConcurrency);
+        Assert.IsGreaterThan(1, observedMaxConcurrency);
         Assert.AreEqual(0, concurrentCallbacks);
     }
 
@@ -891,25 +893,15 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
-    public async Task GetMaxInt64Async_WhenWaitingForPathLockAndCanceled_ThrowsOperationCanceledException()
+    public async Task GetMaxInt64Async_WhenCanceledBeforeOperation_ThrowsOperationCanceledException()
     {
         string dbPath = CreateDbPath();
-        string normalizedPath = Path.GetFullPath(dbPath);
-        ConcurrentDictionary<string, SemaphoreSlim> connectionLocks = GetConnectionLocks();
-        SemaphoreSlim heldGate = new(1, 1);
-        connectionLocks[normalizedPath] = heldGate;
-
-        await heldGate.WaitAsync();
 
         using CancellationTokenSource cts = new();
         cts.Cancel();
 
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () =>
             await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", nameof(QueryLongRecord.Sequence), ct: cts.Token));
-
-        heldGate.Release();
-        connectionLocks.TryRemove(normalizedPath, out _);
-        heldGate.Dispose();
     }
 
     private string CreateDbPath()
@@ -964,12 +956,6 @@ public sealed class DuckDbStorageHelperTests
             closeTimes.Add(reader.GetInt64(0));
 
         return closeTimes;
-    }
-
-    private static ConcurrentDictionary<string, SemaphoreSlim> GetConnectionLocks()
-    {
-        FieldInfo field = typeof(DuckDbStorageHelper).GetField("ConnectionLocks", BindingFlags.Static | BindingFlags.NonPublic)!;
-        return (ConcurrentDictionary<string, SemaphoreSlim>)field.GetValue(null)!;
     }
 
     private sealed class SampleRecord

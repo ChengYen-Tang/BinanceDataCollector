@@ -1,19 +1,18 @@
 ﻿using BinanceDataCollector.Collectors.BinanceMarketData;
 using BinanceDataCollector.WorkItems;
 using CollectorModels.Models.Storage;
-using Microsoft.Extensions.ObjectPool;
 using System.Diagnostics;
 using System.IO.Compression;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal sealed class SymbolRows<T>(string symbolName, List<T> rows, ObjectPool<List<T>> rowsPool) : IDisposable
+internal sealed class SymbolRows<T>(string symbolName, List<T> rows, int poolInitialCapacity) : IDisposable
 {
     public string SymbolName { get; } = symbolName;
     public List<T> Rows { get; } = rows;
 
     public void Dispose()
-        => rowsPool.Return(Rows);
+        => PooledObjectHelper.ReturnList(Rows, poolInitialCapacity);
 }
 
 internal enum AggTradesTimeUnit
@@ -70,7 +69,7 @@ internal abstract class StorageController<T>
         => PooledObjectHelper.RentList<TModel>(BinanceApiModelRowsInitialCapacity);
 
     protected static SymbolRows<TModel> CreateSymbolRows<TModel>(string symbolName, List<TModel> rows)
-        => new(symbolName, rows, PooledObjectHelper.GetListPool<TModel>(BinanceApiModelRowsInitialCapacity));
+        => new(symbolName, rows, BinanceApiModelRowsInitialCapacity);
 
     protected static SymbolRows<TModel> CreateEmptySymbolRows<TModel>(string symbolName)
         => CreateSymbolRows(symbolName, RentModelRows<TModel>());
@@ -381,7 +380,6 @@ internal abstract class StorageController<T>
         where TKey : notnull
     {
         List<TEntity>? uniqueRows = null;
-        ObjectPool<Dictionary<TKey, TEntity>>? uniqueEntitiesPool = null;
         Dictionary<TKey, TEntity>? uniqueEntities = null;
         try
         {
@@ -391,8 +389,7 @@ internal abstract class StorageController<T>
             IReadOnlyList<TEntity> rows = batch.Rows;
             if (batch.Rows.Count > 1)
             {
-                uniqueEntitiesPool = PooledObjectHelper.GetDictionaryPool<TKey, TEntity>(batch.Rows.Count);
-                uniqueEntities = uniqueEntitiesPool.Get();
+                uniqueEntities = PooledObjectHelper.RentDictionary<TKey, TEntity>(batch.Rows.Count);
                 foreach (TEntity entity in batch.Rows)
                     uniqueEntities[getKey(entity)] = entity;
 
@@ -421,8 +418,8 @@ internal abstract class StorageController<T>
         {
             if (uniqueRows is not null)
                 PooledObjectHelper.ReturnList(uniqueRows, BinanceApiModelRowsInitialCapacity);
-            if (uniqueEntities is not null && uniqueEntitiesPool is not null)
-                uniqueEntitiesPool.Return(uniqueEntities);
+            if (uniqueEntities is not null)
+                PooledObjectHelper.ReturnDictionary(uniqueEntities, batch.Rows.Count);
             batch.Dispose();
         }
     }
