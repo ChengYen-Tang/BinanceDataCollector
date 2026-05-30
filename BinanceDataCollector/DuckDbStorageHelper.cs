@@ -12,7 +12,7 @@ namespace BinanceDataCollector;
 
 internal static class DuckDbStorageHelper
 {
-    private const int MarketDataImportBatchSize = 10_000;
+    private const int MarketDataImportBatchSize = 10_0000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -334,7 +334,7 @@ internal static class DuckDbStorageHelper
         await WithConnectionAsync(dbPath, async connection =>
         {
             ct.ThrowIfCancellationRequested();
-            ExecuteDuckDbNonQuery(connection, "CHECKPOINT;");
+            ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
             await Task.CompletedTask;
         }, ct);
     }

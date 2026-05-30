@@ -496,7 +496,6 @@ internal abstract class StorageController<T>
                         ct);
                 }
 
-                await DuckDbStorageHelper.CheckpointAsync(databasePath, ct);
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
                 if (Directory.Exists(extractionDirectory))
@@ -549,7 +548,6 @@ internal abstract class StorageController<T>
                 foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
                     await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(databasePath, batch.Symbol, csvPath, ct);
 
-                await DuckDbStorageHelper.CheckpointAsync(databasePath, ct);
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
                 if (Directory.Exists(extractionDirectory))
@@ -794,8 +792,6 @@ internal abstract class StorageController<T>
                     GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
                     ct);
             }
-
-            await DuckDbStorageHelper.CheckpointAsync(databasePath, ct);
 
             Directory.Delete(legacySymbolPath, true);
             logger.LogInformation("Finish migrating aggTrades legacy storage. Market: {Market}, Symbol: {Symbol}, ImportedFiles: {ImportedFiles}",
