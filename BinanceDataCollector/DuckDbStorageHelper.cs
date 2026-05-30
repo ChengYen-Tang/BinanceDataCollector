@@ -669,6 +669,9 @@ internal static class DuckDbStorageHelper
             return timeCompare != 0 ? timeCompare : x.ParquetAggTradeId.CompareTo(y.ParquetAggTradeId);
         });
 
+        ClearBatchTable(connection, tempTables.RowsTableName);
+        AppendAggTradeRows(connection, tempTables.RowsTableName, batchRows);
+
         using DuckDBTransaction transaction = connection.BeginTransaction();
         if (!tailDeleted)
         {
@@ -680,26 +683,13 @@ internal static class DuckDbStorageHelper
             tailDeleted = true;
         }
 
-        ClearBatchTables(connection, transaction, tempTables);
-        using (DuckDBCommand insertRowCommand = CreateAggTradesBatchRowInsertCommand(connection, transaction, tempTables.RowsTableName))
-        using (DuckDBCommand insertKeyCommand = CreateAggTradesBatchKeyInsertCommand(connection, transaction, tempTables.KeysTableName))
-        {
-            foreach (AggTradeImportRow row in batchRows)
-            {
-                BindAggTradeRow(insertRowCommand, row);
-                insertRowCommand.ExecuteNonQuery();
-                insertKeyCommand.Parameters[0].Value = row.ParquetAggTradeId;
-                insertKeyCommand.ExecuteNonQuery();
-            }
-        }
-
         using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
         {
             deleteByKeyCommand.Transaction = transaction;
             deleteByKeyCommand.CommandText = $"""
                 DELETE FROM {QuoteIdentifier(tableName)}
-                USING {QuoteIdentifier(tempTables.KeysTableName)}
-                WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = {QuoteIdentifier(tempTables.KeysTableName)}.parquetagg_trade_id;
+                USING {QuoteIdentifier(tempTables.RowsTableName)}
+                WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = {QuoteIdentifier(tempTables.RowsTableName)}.parquetagg_trade_id;
                 """;
             deleteByKeyCommand.ExecuteNonQuery();
         }
@@ -741,6 +731,9 @@ internal static class DuckDbStorageHelper
             return timeCompare != 0 ? timeCompare : x.Percentage.CompareTo(y.Percentage);
         });
 
+        ClearBatchTable(connection, tempTables.RowsTableName);
+        AppendBookDepthRows(connection, tempTables.RowsTableName, batchRows);
+
         using DuckDBTransaction transaction = connection.BeginTransaction();
         if (!tailDeleted)
         {
@@ -752,28 +745,14 @@ internal static class DuckDbStorageHelper
             tailDeleted = true;
         }
 
-        ClearBatchTables(connection, transaction, tempTables);
-        using (DuckDBCommand insertRowCommand = CreateBookDepthBatchRowInsertCommand(connection, transaction, tempTables.RowsTableName))
-        using (DuckDBCommand insertKeyCommand = CreateBookDepthBatchKeyInsertCommand(connection, transaction, tempTables.KeysTableName))
-        {
-            foreach (BookDepthImportRow row in batchRows)
-            {
-                BindBookDepthRow(insertRowCommand, row);
-                insertRowCommand.ExecuteNonQuery();
-                insertKeyCommand.Parameters[0].Value = row.SnapshotTime;
-                insertKeyCommand.Parameters[1].Value = row.Percentage;
-                insertKeyCommand.ExecuteNonQuery();
-            }
-        }
-
         using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
         {
             deleteByKeyCommand.Transaction = transaction;
             deleteByKeyCommand.CommandText = $"""
                 DELETE FROM {QuoteIdentifier(tableName)}
-                USING {QuoteIdentifier(tempTables.KeysTableName)}
-                WHERE {QuoteIdentifier(tableName)}.snapshot_time = {QuoteIdentifier(tempTables.KeysTableName)}.snapshot_time
-                  AND {QuoteIdentifier(tableName)}.percentage = {QuoteIdentifier(tempTables.KeysTableName)}.percentage;
+                USING {QuoteIdentifier(tempTables.RowsTableName)}
+                WHERE {QuoteIdentifier(tableName)}.snapshot_time = {QuoteIdentifier(tempTables.RowsTableName)}.snapshot_time
+                  AND {QuoteIdentifier(tableName)}.percentage = {QuoteIdentifier(tempTables.RowsTableName)}.percentage;
                 """;
             deleteByKeyCommand.ExecuteNonQuery();
         }
@@ -808,9 +787,6 @@ internal static class DuckDbStorageHelper
                 transact_time BIGINT,
                 is_buyer_maker BOOLEAN
             );
-            CREATE TEMP TABLE {QuoteIdentifier(tempTables.KeysTableName)} (
-                parquetagg_trade_id BIGINT
-            );
             """);
 
         return tempTables;
@@ -826,10 +802,6 @@ internal static class DuckDbStorageHelper
                 depth DOUBLE,
                 notional DOUBLE
             );
-            CREATE TEMP TABLE {QuoteIdentifier(tempTables.KeysTableName)} (
-                snapshot_time BIGINT,
-                percentage DECIMAL(10,2)
-            );
             """);
 
         return tempTables;
@@ -838,101 +810,56 @@ internal static class DuckDbStorageHelper
     private static BatchTempTables CreateBatchTempTables(string prefix)
     {
         long id = Interlocked.Increment(ref tempTableId);
-        return new($"{prefix}_{id}_rows", $"{prefix}_{id}_keys");
+        return new($"{prefix}_{id}_rows");
     }
 
-    private static void ClearBatchTables(DuckDBConnection connection, DuckDBTransaction transaction, BatchTempTables tempTables)
+    private static void ClearBatchTable(DuckDBConnection connection, string rowsTableName)
     {
         using DuckDBCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            DELETE FROM {QuoteIdentifier(tempTables.RowsTableName)};
-            DELETE FROM {QuoteIdentifier(tempTables.KeysTableName)};
-            """;
+        command.CommandText = $"DELETE FROM {QuoteIdentifier(rowsTableName)};";
         command.ExecuteNonQuery();
     }
 
     private static void DropBatchTempTables(DuckDBConnection connection, BatchTempTables tempTables)
         => ExecuteDuckDbNonQuery(connection, $"""
             DROP TABLE IF EXISTS {QuoteIdentifier(tempTables.RowsTableName)};
-            DROP TABLE IF EXISTS {QuoteIdentifier(tempTables.KeysTableName)};
             """);
 
-    private static DuckDBCommand CreateAggTradesBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string rowsTableName)
+    private static void AppendAggTradeRows(DuckDBConnection connection, string rowsTableName, IReadOnlyList<AggTradeImportRow> rows)
     {
-        DuckDBCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            INSERT INTO {QuoteIdentifier(rowsTableName)}
-            VALUES ($parquetagg_trade_id, $price, $quantity, $first_trade_id, $last_trade_id, $transact_time, $is_buyer_maker);
-            """;
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "parquetagg_trade_id", DbType = DbType.Int64 });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "price", DbType = DbType.Double });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "quantity", DbType = DbType.Double });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "first_trade_id", DbType = DbType.Int64 });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "last_trade_id", DbType = DbType.Int64 });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "transact_time", DbType = DbType.Int64 });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "is_buyer_maker", DbType = DbType.Boolean });
-        return command;
+        using DuckDBAppender appender = connection.CreateAppender(rowsTableName);
+        foreach (AggTradeImportRow row in rows)
+        {
+            appender
+                .CreateRow()
+                .AppendValue(row.ParquetAggTradeId)
+                .AppendValue(row.Price)
+                .AppendValue(row.Quantity)
+                .AppendValue(row.FirstTradeId)
+                .AppendValue(row.LastTradeId)
+                .AppendValue(row.TransactTime)
+                .AppendValue(row.IsBuyerMaker)
+                .EndRow();
+        }
+
+        appender.Close();
     }
 
-    private static DuckDBCommand CreateAggTradesBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string keysTableName)
+    private static void AppendBookDepthRows(DuckDBConnection connection, string rowsTableName, IReadOnlyList<BookDepthImportRow> rows)
     {
-        DuckDBCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            INSERT INTO {QuoteIdentifier(keysTableName)}
-            VALUES ($parquetagg_trade_id);
-            """;
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "parquetagg_trade_id", DbType = DbType.Int64 });
-        return command;
-    }
+        using DuckDBAppender appender = connection.CreateAppender(rowsTableName);
+        foreach (BookDepthImportRow row in rows)
+        {
+            appender
+                .CreateRow()
+                .AppendValue(row.SnapshotTime)
+                .AppendValue(row.Percentage)
+                .AppendValue(row.Depth)
+                .AppendValue(row.Notional)
+                .EndRow();
+        }
 
-    private static DuckDBCommand CreateBookDepthBatchRowInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string rowsTableName)
-    {
-        DuckDBCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            INSERT INTO {QuoteIdentifier(rowsTableName)}
-            VALUES ($snapshot_time, $percentage, $depth, $notional);
-            """;
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "snapshot_time", DbType = DbType.Int64 });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "percentage", DbType = DbType.Decimal });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "depth", DbType = DbType.Double });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "notional", DbType = DbType.Double });
-        return command;
-    }
-
-    private static DuckDBCommand CreateBookDepthBatchKeyInsertCommand(DuckDBConnection connection, DuckDBTransaction transaction, string keysTableName)
-    {
-        DuckDBCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            INSERT INTO {QuoteIdentifier(keysTableName)}
-            VALUES ($snapshot_time, $percentage);
-            """;
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "snapshot_time", DbType = DbType.Int64 });
-        command.Parameters.Add(new DuckDBParameter { ParameterName = "percentage", DbType = DbType.Decimal });
-        return command;
-    }
-
-    private static void BindAggTradeRow(DuckDBCommand command, AggTradeImportRow row)
-    {
-        command.Parameters[0].Value = row.ParquetAggTradeId;
-        command.Parameters[1].Value = row.Price;
-        command.Parameters[2].Value = row.Quantity;
-        command.Parameters[3].Value = row.FirstTradeId;
-        command.Parameters[4].Value = row.LastTradeId;
-        command.Parameters[5].Value = row.TransactTime;
-        command.Parameters[6].Value = row.IsBuyerMaker;
-    }
-
-    private static void BindBookDepthRow(DuckDBCommand command, BookDepthImportRow row)
-    {
-        command.Parameters[0].Value = row.SnapshotTime;
-        command.Parameters[1].Value = row.Percentage;
-        command.Parameters[2].Value = row.Depth;
-        command.Parameters[3].Value = row.Notional;
+        appender.Close();
     }
 
     private static long GetAggTradesCsvMinTimestamp(string csvPath, bool sourceIsMicroseconds)
@@ -1230,7 +1157,7 @@ internal static class DuckDbStorageHelper
 
     private readonly record struct DbTableLockKey(string NormalizedPath, string TableName);
 
-    private readonly record struct BatchTempTables(string RowsTableName, string KeysTableName);
+    private readonly record struct BatchTempTables(string RowsTableName);
 
     private sealed class DbTableLockKeyComparer : IEqualityComparer<DbTableLockKey>
     {
