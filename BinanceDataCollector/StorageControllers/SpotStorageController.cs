@@ -93,24 +93,24 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     public override Task<DateTime> GetLastBasisTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support basis.");
 
-    protected override async Task<Result<List<Kline>>> GetKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override async Task<Result<IReadOnlyList<Kline>>> GetKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
         Result<List<IBinanceKline>> result = await spot.GetKlinesAsync(symbol.Name, interval, startTime, ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        return Result.Ok(ConvertToModelRows(result.Value, kline => new Kline
+        return Result.Ok<IReadOnlyList<Kline>>(ConvertToModelRows<IBinanceKline, Kline>(result.Value, (kline, row) =>
         {
-            OpenPrice = decimal.ToDouble(kline.OpenPrice),
-            ClosePrice = decimal.ToDouble(kline.ClosePrice),
-            HighPrice = decimal.ToDouble(kline.HighPrice),
-            LowPrice = decimal.ToDouble(kline.LowPrice),
-            Volume = decimal.ToDouble(kline.Volume),
-            QuoteVolume = decimal.ToDouble(kline.QuoteVolume),
-            TakerBuyBaseVolume = decimal.ToDouble(kline.TakerBuyBaseVolume),
-            TakerBuyQuoteVolume = decimal.ToDouble(kline.TakerBuyQuoteVolume),
-            TradeCount = kline.TradeCount,
-            OpenTime = ToUnixMilliseconds(kline.OpenTime),
-            CloseTime = ToUnixMilliseconds(kline.CloseTime)
+            row.OpenPrice = decimal.ToDouble(kline.OpenPrice);
+            row.ClosePrice = decimal.ToDouble(kline.ClosePrice);
+            row.HighPrice = decimal.ToDouble(kline.HighPrice);
+            row.LowPrice = decimal.ToDouble(kline.LowPrice);
+            row.Volume = decimal.ToDouble(kline.Volume);
+            row.QuoteVolume = decimal.ToDouble(kline.QuoteVolume);
+            row.TakerBuyBaseVolume = decimal.ToDouble(kline.TakerBuyBaseVolume);
+            row.TakerBuyQuoteVolume = decimal.ToDouble(kline.TakerBuyQuoteVolume);
+            row.TradeCount = kline.TradeCount;
+            row.OpenTime = ToUnixMilliseconds(kline.OpenTime);
+            row.CloseTime = ToUnixMilliseconds(kline.CloseTime);
         }));
     }
 
@@ -120,34 +120,34 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     protected override Task<Result<MarketDataDownloadBatch>> GetBookDepthAsync(SymbolInfoCsv symbol, DateTime downloadStartTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support book depth market data.");
 
-    protected override Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotImplementedException();
 
-    protected override Task<Result<List<PremiumIndexKline>>> GetIndexPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<PremiumIndexKline>>> GetIndexPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support index price klines.");
 
-    protected override Task<Result<List<PremiumIndexKline>>> GetMarkPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<PremiumIndexKline>>> GetMarkPriceKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support mark price klines.");
 
-    protected override Task<Result<List<FundingRate>>> GetFundingRatesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<FundingRate>>> GetFundingRatesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support funding rates.");
 
-    protected override Task<Result<List<OpenInterestHistory>>> GetOpenInterestHistoriesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<OpenInterestHistory>>> GetOpenInterestHistoriesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support open interest histories.");
 
-    protected override Task<Result<List<LongShortRatioCsv>>> GetTopLongShortPositionRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetTopLongShortPositionRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support long/short ratios.");
 
-    protected override Task<Result<List<LongShortRatioCsv>>> GetTopLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetTopLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support long/short ratios.");
 
-    protected override Task<Result<List<LongShortRatioCsv>>> GetGlobalLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetGlobalLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support long/short ratios.");
 
-    protected override Task<Result<List<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support taker long/short ratios.");
 
-    protected override Task<Result<List<FuturesBasisCsv>>> GetBasisAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
+    protected override Task<Result<IReadOnlyList<FuturesBasisCsv>>> GetBasisAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support basis.");
 
     protected override async Task<Result<List<SymbolInfoCsv>>> GetMarketAsync(CancellationToken ct = default)
@@ -155,26 +155,27 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
         Result<IEnumerable<BinanceSymbol>> result = await spot.GetMarketAsync(ct);
         if (result.IsFailed)
             return Result.Fail(result.Errors);
-        List<SymbolInfoCsv> markets = result.Value.AsParallel().Select(symbol => new SymbolInfoCsv
+
+        List<SymbolInfoCsv> markets = ConvertToMarketRows<BinanceSymbol, SymbolInfoCsv>(result.Value, (symbol, row) =>
         {
-            Name = symbol.Name,
-            BaseAsset = symbol.BaseAsset,
-            BaseAssetPrecision = symbol.BaseAssetPrecision,
-            BaseFeePrecision = symbol.BaseFeePrecision,
-            AllowTrailingStop = symbol.AllowTrailingStop,
-            CancelReplaceAllowed = symbol.CancelReplaceAllowed,
-            IcebergAllowed = symbol.IcebergAllowed,
-            IsMarginTradingAllowed = symbol.IsMarginTradingAllowed,
-            IsSpotTradingAllowed = symbol.IsSpotTradingAllowed,
-            OCOAllowed = symbol.OCOAllowed,
-            OrderTypes = string.Join('|', symbol.OrderTypes),
-            QuoteAsset = symbol.QuoteAsset,
-            QuoteAssetPrecision = symbol.QuoteAssetPrecision,
-            QuoteFeePrecision = symbol.QuoteFeePrecision,
-            Permissions = string.Join('|', symbol.Permissions),
-            QuoteOrderQuantityMarketAllowed = symbol.QuoteOrderQuantityMarketAllowed,
-            Status = symbol.Status.ToString()
-        }).ToList();
+            row.Name = symbol.Name;
+            row.BaseAsset = symbol.BaseAsset;
+            row.BaseAssetPrecision = symbol.BaseAssetPrecision;
+            row.BaseFeePrecision = symbol.BaseFeePrecision;
+            row.AllowTrailingStop = symbol.AllowTrailingStop;
+            row.CancelReplaceAllowed = symbol.CancelReplaceAllowed;
+            row.IcebergAllowed = symbol.IcebergAllowed;
+            row.IsMarginTradingAllowed = symbol.IsMarginTradingAllowed;
+            row.IsSpotTradingAllowed = symbol.IsSpotTradingAllowed;
+            row.OCOAllowed = symbol.OCOAllowed;
+            row.OrderTypes = string.Join('|', symbol.OrderTypes);
+            row.QuoteAsset = symbol.QuoteAsset;
+            row.QuoteAssetPrecision = symbol.QuoteAssetPrecision;
+            row.QuoteFeePrecision = symbol.QuoteFeePrecision;
+            row.Permissions = string.Join('|', symbol.Permissions);
+            row.QuoteOrderQuantityMarketAllowed = symbol.QuoteOrderQuantityMarketAllowed;
+            row.Status = symbol.Status.ToString();
+        });
 
         return Result.Ok(markets);
     }

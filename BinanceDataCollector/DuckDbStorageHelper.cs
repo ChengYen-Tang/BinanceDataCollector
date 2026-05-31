@@ -598,8 +598,8 @@ internal static class DuckDbStorageHelper
         bool replaceTail)
     {
         BatchTempTables tempTables = CreateAggTradesBatchTables(connection);
-        List<AggTradeImportRow> batchRows = PooledObjectHelper.RentList<AggTradeImportRow>(MarketDataImportBatchSize);
-        Dictionary<long, AggTradeImportRow> batchDedup = PooledObjectHelper.RentDictionary<long, AggTradeImportRow>(MarketDataImportBatchSize);
+        List<AggTradeImportRow> batchRows = new(MarketDataImportBatchSize);
+        Dictionary<long, AggTradeImportRow> batchDedup = new(MarketDataImportBatchSize);
         bool tailDeleted = !replaceTail;
         long replaceFrom = replaceTail
             ? GetAggTradesCsvMinTimestamp(csvPath, sourceIsMicroseconds)
@@ -624,16 +624,14 @@ internal static class DuckDbStorageHelper
         finally
         {
             DropBatchTempTables(connection, tempTables);
-            PooledObjectHelper.ReturnList(batchRows, MarketDataImportBatchSize);
-            PooledObjectHelper.ReturnDictionary(batchDedup, MarketDataImportBatchSize);
         }
     }
 
     private static void ImportBookDepthCsv(DuckDBConnection connection, string tableName, string csvPath)
     {
         BatchTempTables tempTables = CreateBookDepthBatchTables(connection);
-        List<BookDepthImportRow> batchRows = PooledObjectHelper.RentList<BookDepthImportRow>(MarketDataImportBatchSize);
-        Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup = PooledObjectHelper.RentDictionary<BookDepthRowKey, BookDepthImportRow>(MarketDataImportBatchSize);
+        List<BookDepthImportRow> batchRows = new(MarketDataImportBatchSize);
+        Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup = new(MarketDataImportBatchSize);
         bool tailDeleted = false;
         long replaceFrom = GetBookDepthCsvMinTimestamp(csvPath);
 
@@ -663,8 +661,6 @@ internal static class DuckDbStorageHelper
         finally
         {
             DropBatchTempTables(connection, tempTables);
-            PooledObjectHelper.ReturnList(batchRows, MarketDataImportBatchSize);
-            PooledObjectHelper.ReturnDictionary(batchDedup, MarketDataImportBatchSize);
         }
     }
 
@@ -681,7 +677,8 @@ internal static class DuckDbStorageHelper
             return;
 
         batchRows.Clear();
-        batchRows.AddRange(batchDedup.Values);
+        foreach (AggTradeImportRow row in batchDedup.Values)
+            batchRows.Add(row);
         batchRows.Sort(static (x, y) =>
         {
             int timeCompare = x.TransactTime.CompareTo(y.TransactTime);
@@ -743,7 +740,8 @@ internal static class DuckDbStorageHelper
             return;
 
         batchRows.Clear();
-        batchRows.AddRange(batchDedup.Values);
+        foreach (BookDepthImportRow row in batchDedup.Values)
+            batchRows.Add(row);
         batchRows.Sort(static (x, y) =>
         {
             int timeCompare = x.SnapshotTime.CompareTo(y.SnapshotTime);

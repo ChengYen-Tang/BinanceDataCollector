@@ -6,13 +6,12 @@ using System.IO.Compression;
 
 namespace BinanceDataCollector.StorageControllers;
 
-internal sealed class SymbolRows<T>(string symbolName, List<T> rows, int poolInitialCapacity) : IDisposable
+internal sealed class SymbolRows<T>(string symbolName, IReadOnlyList<T> rows) : IDisposable
 {
     public string SymbolName { get; } = symbolName;
-    public List<T> Rows { get; } = rows;
+    public IReadOnlyList<T> Rows { get; } = rows;
 
-    public void Dispose()
-        => PooledObjectHelper.ReturnList(Rows, poolInitialCapacity);
+    public void Dispose() { }
 }
 
 internal enum AggTradesTimeUnit
@@ -65,37 +64,48 @@ internal abstract class StorageController<T>
     public StorageController(IServiceProvider serviceProvider, ILogger logger)
         => (this.serviceProvider, this.logger, yearsReserved) = (serviceProvider, logger, DateTime.Today.AddYears(-3));
 
-    protected static List<TModel> RentModelRows<TModel>()
-        => PooledObjectHelper.RentList<TModel>(BinanceApiModelRowsInitialCapacity);
-
-    protected static SymbolRows<TModel> CreateSymbolRows<TModel>(string symbolName, List<TModel> rows)
-        => new(symbolName, rows, BinanceApiModelRowsInitialCapacity);
+    protected static SymbolRows<TModel> CreateSymbolRows<TModel>(string symbolName, IReadOnlyList<TModel> rows)
+        => new(symbolName, rows);
 
     protected static SymbolRows<TModel> CreateEmptySymbolRows<TModel>(string symbolName)
-        => CreateSymbolRows(symbolName, RentModelRows<TModel>());
+        => CreateSymbolRows(symbolName, new List<TModel>());
 
-    protected static List<TModel> ConvertToModelRows<TSource, TModel>(IEnumerable<TSource> source, Func<TSource, TModel> map)
+    protected static List<TModel> ConvertToModelRows<TSource, TModel>(IEnumerable<TSource> source, Action<TSource, TModel> map)
+        where TModel : class, new()
     {
-        List<TModel> rows = RentModelRows<TModel>();
+        List<TModel> rows = new(BinanceApiModelRowsInitialCapacity);
         foreach (TSource item in source)
-            rows.Add(map(item));
+        {
+            TModel row = new();
+            map(item, row);
+            rows.Add(row);
+        }
         return rows;
     }
 
     protected static List<TModel> ConvertToModelRows<TSource, TModel>(
         IEnumerable<TSource> source,
         Func<TSource, bool> predicate,
-        Func<TSource, TModel> map)
+        Action<TSource, TModel> map)
+        where TModel : class, new()
     {
-        List<TModel> rows = RentModelRows<TModel>();
+        List<TModel> rows = new(BinanceApiModelRowsInitialCapacity);
         foreach (TSource item in source)
         {
             if (predicate(item))
-                rows.Add(map(item));
+            {
+                TModel row = new();
+                map(item, row);
+                rows.Add(row);
+            }
         }
 
         return rows;
     }
+
+    protected static List<TModel> ConvertToMarketRows<TSource, TModel>(IEnumerable<TSource> source, Action<TSource, TModel> map)
+        where TModel : class, new()
+        => ConvertToModelRows(source, map);
 
     public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
     {
@@ -142,7 +152,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(Kline), symbol, interval, startTime);
-        Result<List<Kline>> result = await GetKlinesAsync(symbol, interval, startTime, ct);
+        Result<IReadOnlyList<Kline>> result = await GetKlinesAsync(symbol, interval, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(Kline), symbol, interval, startTime);
         if (result.IsFailed)
         {
@@ -159,7 +169,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(PremiumIndexKline), symbol, interval, startTime);
-        Result<List<PremiumIndexKline>> result = await GetIndexPriceKlinesAsync(symbol, interval, startTime, ct);
+        Result<IReadOnlyList<PremiumIndexKline>> result = await GetIndexPriceKlinesAsync(symbol, interval, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(PremiumIndexKline), symbol, interval, startTime);
         if (result.IsFailed)
         {
@@ -176,7 +186,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(PremiumIndexKline), symbol, interval, startTime);
-        Result<List<PremiumIndexKline>> result = await GetMarkPriceKlinesAsync(symbol, interval, startTime, ct);
+        Result<IReadOnlyList<PremiumIndexKline>> result = await GetMarkPriceKlinesAsync(symbol, interval, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(PremiumIndexKline), symbol, interval, startTime);
         if (result.IsFailed)
         {
@@ -193,7 +203,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(PremiumIndexKline), symbol, interval, startTime);
-        Result<List<PremiumIndexKline>> result = await GetPremiumIndexKlinesAsync(symbol, interval, startTime, ct);
+        Result<IReadOnlyList<PremiumIndexKline>> result = await GetPremiumIndexKlinesAsync(symbol, interval, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}", nameof(PremiumIndexKline), symbol, interval, startTime);
         if (result.IsFailed)
         {
@@ -210,7 +220,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(FundingRate), symbol, startTime);
-        Result<List<FundingRate>> result = await GetFundingRatesAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<FundingRate>> result = await GetFundingRatesAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(FundingRate), symbol, startTime);
         if (result.IsFailed)
         {
@@ -227,7 +237,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(OpenInterestHistory), symbol, startTime);
-        Result<List<OpenInterestHistory>> result = await GetOpenInterestHistoriesAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<OpenInterestHistory>> result = await GetOpenInterestHistoriesAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(OpenInterestHistory), symbol, startTime);
         if (result.IsFailed)
         {
@@ -244,7 +254,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(LongShortRatioCsv), symbol, startTime);
-        Result<List<LongShortRatioCsv>> result = await GetTopLongShortPositionRatiosAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<LongShortRatioCsv>> result = await GetTopLongShortPositionRatiosAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(LongShortRatioCsv), symbol, startTime);
         if (result.IsFailed)
         {
@@ -261,7 +271,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(LongShortRatioCsv), symbol, startTime);
-        Result<List<LongShortRatioCsv>> result = await GetTopLongShortAccountRatiosAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<LongShortRatioCsv>> result = await GetTopLongShortAccountRatiosAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(LongShortRatioCsv), symbol, startTime);
         if (result.IsFailed)
         {
@@ -278,7 +288,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(LongShortRatioCsv), symbol, startTime);
-        Result<List<LongShortRatioCsv>> result = await GetGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<LongShortRatioCsv>> result = await GetGlobalLongShortAccountRatiosAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(LongShortRatioCsv), symbol, startTime);
         if (result.IsFailed)
         {
@@ -295,7 +305,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(TakerLongShortRatioCsv), symbol, startTime);
-        Result<List<TakerLongShortRatioCsv>> result = await GetTakerLongShortRatiosAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<TakerLongShortRatioCsv>> result = await GetTakerLongShortRatiosAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(TakerLongShortRatioCsv), symbol, startTime);
         if (result.IsFailed)
         {
@@ -312,7 +322,7 @@ internal abstract class StorageController<T>
     {
         string symbolName = GetSymbolName(symbol);
         logger.LogDebug("Start getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(FuturesBasisCsv), symbol, startTime);
-        Result<List<FuturesBasisCsv>> result = await GetBasisAsync(symbol, startTime, ct);
+        Result<IReadOnlyList<FuturesBasisCsv>> result = await GetBasisAsync(symbol, startTime, ct);
         logger.LogDebug("Finish getting {DataType}. Symbol: {Symbol}, StartTime: {StartTime}", nameof(FuturesBasisCsv), symbol, startTime);
         if (result.IsFailed)
         {
@@ -389,7 +399,7 @@ internal abstract class StorageController<T>
             IReadOnlyList<TEntity> rows = batch.Rows;
             if (batch.Rows.Count > 1)
             {
-                uniqueEntities = PooledObjectHelper.RentDictionary<TKey, TEntity>(batch.Rows.Count);
+                uniqueEntities = new Dictionary<TKey, TEntity>(batch.Rows.Count);
                 foreach (TEntity entity in batch.Rows)
                     uniqueEntities[getKey(entity)] = entity;
 
@@ -397,7 +407,7 @@ internal abstract class StorageController<T>
                 {
                     logger.LogWarning("Deduplicated insert batch. DataType: {DataType}, OriginalCount: {OriginalCount}, UniqueCount: {UniqueCount}",
                         typeof(TEntity).Name, batch.Rows.Count, uniqueEntities.Count);
-                    uniqueRows = RentModelRows<TEntity>();
+                    uniqueRows = new(BinanceApiModelRowsInitialCapacity);
                     uniqueRows.AddRange(uniqueEntities.Values);
                     rows = uniqueRows;
                 }
@@ -417,9 +427,6 @@ internal abstract class StorageController<T>
         finally
         {
             if (uniqueRows is not null)
-                PooledObjectHelper.ReturnList(uniqueRows, BinanceApiModelRowsInitialCapacity);
-            if (uniqueEntities is not null)
-                PooledObjectHelper.ReturnDictionary(uniqueEntities, batch.Rows.Count);
             batch.Dispose();
         }
     }
@@ -661,17 +668,17 @@ internal abstract class StorageController<T>
         T symbol,
         DateTime downloadStartTime,
         CancellationToken ct = default);
-    protected abstract Task<Result<List<Kline>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<PremiumIndexKline>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<PremiumIndexKline>>> GetMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<FundingRate>>> GetFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<OpenInterestHistory>>> GetOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<LongShortRatioCsv>>> GetTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<LongShortRatioCsv>>> GetTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<LongShortRatioCsv>>> GetGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
-    protected abstract Task<Result<List<FuturesBasisCsv>>> GetBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<Kline>>> GetKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<PremiumIndexKline>>> GetPremiumIndexKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<PremiumIndexKline>>> GetIndexPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<PremiumIndexKline>>> GetMarkPriceKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<FundingRate>>> GetFundingRatesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<OpenInterestHistory>>> GetOpenInterestHistoriesAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetTopLongShortPositionRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetTopLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetGlobalLongShortAccountRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
+    protected abstract Task<Result<IReadOnlyList<FuturesBasisCsv>>> GetBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
     protected Task DeleteMarketDataSymbolDirectoriesAsync(IReadOnlyCollection<string> delistedSymbols, IReadOnlyCollection<string> marketDataTypes, CancellationToken ct = default)
     {

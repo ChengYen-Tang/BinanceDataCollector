@@ -966,6 +966,59 @@ public sealed class DuckDbStorageHelperTests
             await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", nameof(QueryLongRecord.Sequence), ct: cts.Token));
     }
 
+    [TestMethod]
+    public async Task AppendAggTradesFromCsvAsync_WhenFinalBatchIsPartial_DoesNotPersistStaleRows()
+    {
+        string dbPath = CreateDbPath();
+        string csvPath = Path.Combine(tempDirectory, "aggTrades.csv");
+        const int totalRows = 100_001;
+
+        WriteAggTradesCsv(csvPath, totalRows);
+
+        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(dbPath, "BTCUSDT", csvPath, sourceIsMicroseconds: false);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(parquetagg_trade_id), MAX(parquetagg_trade_id), MAX(transact_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(totalRows, reader.GetInt64(0));
+        Assert.AreEqual(1L, reader.GetInt64(1));
+        Assert.AreEqual(totalRows, reader.GetInt64(2));
+        Assert.AreEqual(totalRows * 1_000_000L, reader.GetInt64(3));
+    }
+
+    [TestMethod]
+    public async Task ReplaceBookDepthTailFromCsvAsync_WhenFinalBatchIsPartial_DoesNotPersistStaleRows()
+    {
+        string dbPath = CreateDbPath();
+        string csvPath = Path.Combine(tempDirectory, "bookDepth.csv");
+        const int totalRows = 100_001;
+
+        WriteBookDepthCsv(csvPath, totalRows);
+
+        await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(dbPath, "BTCUSDT", csvPath);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(snapshot_time), MAX(snapshot_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(totalRows, reader.GetInt64(0));
+        Assert.AreEqual(1_735_689_600_000L, reader.GetInt64(1));
+        Assert.AreEqual(1_735_689_600_000L + ((totalRows - 1) * 60_000L), reader.GetInt64(2));
+    }
+
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
 
@@ -1004,6 +1057,46 @@ public sealed class DuckDbStorageHelperTests
                 MarkPrice = 100_000 + index
             })
             .ToArray();
+
+    private static void WriteAggTradesCsv(string csvPath, int totalRows)
+    {
+        using StreamWriter writer = new(csvPath);
+        for (int index = 1; index <= totalRows; index++)
+        {
+            writer.Write(index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write((100 + index).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write((1.5 + index).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write((index * 10L).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write(((index * 10L) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write((index * 1_000L).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write(index % 2 == 0 ? "true" : "false");
+            writer.WriteLine();
+        }
+    }
+
+    private static void WriteBookDepthCsv(string csvPath, int totalRows)
+    {
+        DateTime startTime = new(2025, 01, 01, 0, 0, 0, DateTimeKind.Utc);
+        using StreamWriter writer = new(csvPath);
+        writer.WriteLine("timestamp,percentage,depth,notional");
+        for (int index = 0; index < totalRows; index++)
+        {
+            writer.Write(startTime.AddMinutes(index).ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write(((index % 100) / 10m).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write((1000 + index).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.Write(',');
+            writer.Write((5000 + index).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            writer.WriteLine();
+        }
+    }
 
     private static async Task<List<long>> ReadKlineCloseTimesAsync(string dbPath, string tableName)
     {
