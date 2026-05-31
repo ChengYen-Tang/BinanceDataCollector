@@ -44,25 +44,30 @@ internal static class DuckDbStorageHelper
             List<T> recordList = [.. records];
             PropertyInfo[] properties = GetPersistedProperties(typeof(T));
             using DuckDBConnection connection = OpenConnection(normalizedPath);
-            using DuckDBTransaction transaction = connection.BeginTransaction();
-
-            if (recreateTable)
+            BatchTempTables tempTables = CreateGenericBatchTables(connection, properties);
+            try
             {
-                using DuckDBCommand dropCommand = connection.CreateCommand();
-                dropCommand.Transaction = transaction;
-                dropCommand.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
-                await dropCommand.ExecuteNonQueryAsync(ct);
+                AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, ct);
+
+                using DuckDBTransaction transaction = connection.BeginTransaction();
+
+                if (recreateTable)
+                {
+                    using DuckDBCommand dropCommand = connection.CreateCommand();
+                    dropCommand.Transaction = transaction;
+                    dropCommand.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
+                    await dropCommand.ExecuteNonQueryAsync(ct);
+                }
+
+                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+                DeleteAllRows(connection, transaction, tableName);
+                InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
+                transaction.Commit();
             }
-
-            await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
-
-            using DuckDBCommand deleteCommand = connection.CreateCommand();
-            deleteCommand.Transaction = transaction;
-            deleteCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)};";
-            await deleteCommand.ExecuteNonQueryAsync(ct);
-
-            await InsertRowsAsync(connection, transaction, tableName, properties, recordList, ct);
-            transaction.Commit();
+            finally
+            {
+                DropBatchTempTables(connection, tempTables);
+            }
         });
     }
 
@@ -84,26 +89,21 @@ internal static class DuckDbStorageHelper
                 ?? throw new InvalidOperationException($"Key column '{keyColumn}' was not found on type '{typeof(T).FullName}'.");
 
             using DuckDBConnection connection = OpenConnection(normalizedPath);
-            using DuckDBTransaction transaction = connection.BeginTransaction();
-
-            await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
-
-            using DuckDBCommand deleteByKeyCommand = connection.CreateCommand();
-            deleteByKeyCommand.Transaction = transaction;
-            deleteByKeyCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(keyColumn)} = ?;";
-            IDbDataParameter deleteKeyParameter = deleteByKeyCommand.CreateParameter();
-            deleteKeyParameter.DbType = MapDbType(keyProperty.PropertyType);
-            deleteByKeyCommand.Parameters.Add(deleteKeyParameter);
-
-            foreach (T record in recordList)
+            BatchTempTables tempTables = CreateGenericBatchTables(connection, properties);
+            try
             {
-                ct.ThrowIfCancellationRequested();
-                deleteKeyParameter.Value = ConvertToDbValue(keyProperty.GetValue(record), keyProperty.PropertyType);
-                await deleteByKeyCommand.ExecuteNonQueryAsync(ct);
-            }
+                AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, ct);
 
-            await InsertRowsAsync(connection, transaction, tableName, properties, recordList, ct);
-            transaction.Commit();
+                using DuckDBTransaction transaction = connection.BeginTransaction();
+                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+                DeleteRowsByJoinKey(connection, transaction, tableName, tempTables.RowsTableName, keyProperty.Name);
+                InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
+                transaction.Commit();
+            }
+            finally
+            {
+                DropBatchTempTables(connection, tempTables);
+            }
         });
     }
 
@@ -516,36 +516,55 @@ internal static class DuckDbStorageHelper
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task InsertRowsAsync<T>(
+    private static void DeleteAllRows(DuckDBConnection connection, DuckDBTransaction transaction, string tableName)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)};";
+        command.ExecuteNonQuery();
+    }
+
+    private static void DeleteRowsByJoinKey(DuckDBConnection connection, DuckDBTransaction transaction, string tableName, string stagingTableName, string keyColumn)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            DELETE FROM {QuoteIdentifier(tableName)}
+            USING {QuoteIdentifier(stagingTableName)}
+            WHERE {QuoteIdentifier(tableName)}.{QuoteIdentifier(keyColumn)} = {QuoteIdentifier(stagingTableName)}.{QuoteIdentifier(keyColumn)};
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void InsertFromStagingTable(
         DuckDBConnection connection,
         DuckDBTransaction transaction,
         string tableName,
-        PropertyInfo[] properties,
+        string stagingTableName,
+        IReadOnlyList<PropertyInfo> properties)
+    {
+        using DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            INSERT INTO {QuoteIdentifier(tableName)} ({BuildColumnListSql(properties)})
+            SELECT {BuildColumnListSql(properties)}
+            FROM {QuoteIdentifier(stagingTableName)};
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void AppendObjectRows<T>(
+        DuckDBConnection connection,
+        string tableName,
+        IReadOnlyList<PropertyInfo> properties,
         IReadOnlyList<T> records,
         CancellationToken ct)
     {
-        using DuckDBCommand insertCommand = connection.CreateCommand();
-        insertCommand.Transaction = transaction;
-        insertCommand.CommandText = BuildInsertSql(tableName, properties);
-
-        for (int i = 0; i < properties.Length; i++)
+        AppendRows(connection, tableName, records, static (row, record, state) =>
         {
-            IDbDataParameter parameter = insertCommand.CreateParameter();
-            parameter.DbType = MapDbType(properties[i].PropertyType);
-            insertCommand.Parameters.Add(parameter);
-        }
-
-        foreach (T record in records)
-        {
-            ct.ThrowIfCancellationRequested();
-            for (int i = 0; i < properties.Length; i++)
-            {
-                PropertyInfo property = properties[i];
-                insertCommand.Parameters[i].Value = ConvertToDbValue(property.GetValue(record), property.PropertyType);
-            }
-
-            await insertCommand.ExecuteNonQueryAsync(ct);
-        }
+            foreach (PropertyInfo property in state)
+                AppendDbValue(row, ConvertToDbValue(property.GetValue(record), property.PropertyType));
+        }, properties, ct);
     }
 
     private static void EnsureAggTradesTable(DuckDBConnection connection, string tableName)
@@ -777,16 +796,14 @@ internal static class DuckDbStorageHelper
     private static BatchTempTables CreateAggTradesBatchTables(DuckDBConnection connection)
     {
         BatchTempTables tempTables = CreateBatchTempTables("temp_agg_trades_batch");
-        ExecuteDuckDbNonQuery(connection, $"""
-            CREATE TEMP TABLE {QuoteIdentifier(tempTables.RowsTableName)} (
-                parquetagg_trade_id BIGINT,
-                price DOUBLE,
-                quantity DOUBLE,
-                first_trade_id BIGINT,
-                last_trade_id BIGINT,
-                transact_time BIGINT,
-                is_buyer_maker BOOLEAN
-            );
+        CreateTemporaryTable(connection, tempTables.RowsTableName, """
+            parquetagg_trade_id BIGINT,
+            price DOUBLE,
+            quantity DOUBLE,
+            first_trade_id BIGINT,
+            last_trade_id BIGINT,
+            transact_time BIGINT,
+            is_buyer_maker BOOLEAN
             """);
 
         return tempTables;
@@ -795,14 +812,20 @@ internal static class DuckDbStorageHelper
     private static BatchTempTables CreateBookDepthBatchTables(DuckDBConnection connection)
     {
         BatchTempTables tempTables = CreateBatchTempTables("temp_book_depth_batch");
-        ExecuteDuckDbNonQuery(connection, $"""
-            CREATE TEMP TABLE {QuoteIdentifier(tempTables.RowsTableName)} (
-                snapshot_time BIGINT,
-                percentage DECIMAL(10,2),
-                depth DOUBLE,
-                notional DOUBLE
-            );
+        CreateTemporaryTable(connection, tempTables.RowsTableName, """
+            snapshot_time BIGINT,
+            percentage DECIMAL(10,2),
+            depth DOUBLE,
+            notional DOUBLE
             """);
+
+        return tempTables;
+    }
+
+    private static BatchTempTables CreateGenericBatchTables(DuckDBConnection connection, IReadOnlyList<PropertyInfo> properties)
+    {
+        BatchTempTables tempTables = CreateBatchTempTables("temp_generic_batch");
+        CreateTemporaryTable(connection, tempTables.RowsTableName, BuildColumnDefinitionsSql(properties));
 
         return tempTables;
     }
@@ -826,37 +849,42 @@ internal static class DuckDbStorageHelper
             """);
 
     private static void AppendAggTradeRows(DuckDBConnection connection, string rowsTableName, IReadOnlyList<AggTradeImportRow> rows)
-    {
-        using DuckDBAppender appender = connection.CreateAppender(rowsTableName);
-        foreach (AggTradeImportRow row in rows)
-        {
-            appender
-                .CreateRow()
+        => AppendRows<AggTradeImportRow, object?>(connection, rowsTableName, rows, static (appenderRow, row, _) =>
+            appenderRow
                 .AppendValue(row.ParquetAggTradeId)
                 .AppendValue(row.Price)
                 .AppendValue(row.Quantity)
                 .AppendValue(row.FirstTradeId)
                 .AppendValue(row.LastTradeId)
                 .AppendValue(row.TransactTime)
-                .AppendValue(row.IsBuyerMaker)
-                .EndRow();
-        }
-
-        appender.Close();
-    }
+                .AppendValue(row.IsBuyerMaker));
 
     private static void AppendBookDepthRows(DuckDBConnection connection, string rowsTableName, IReadOnlyList<BookDepthImportRow> rows)
     {
-        using DuckDBAppender appender = connection.CreateAppender(rowsTableName);
-        foreach (BookDepthImportRow row in rows)
-        {
-            appender
-                .CreateRow()
+        AppendRows<BookDepthImportRow, object?>(connection, rowsTableName, rows, static (appenderRow, row, _) =>
+            appenderRow
                 .AppendValue(row.SnapshotTime)
                 .AppendValue(row.Percentage)
                 .AppendValue(row.Depth)
-                .AppendValue(row.Notional)
-                .EndRow();
+                .AppendValue(row.Notional));
+    }
+
+    private static void AppendRows<TRow, TState>(
+        DuckDBConnection connection,
+        string tableName,
+        IReadOnlyList<TRow> rows,
+        Action<IDuckDBAppenderRow, TRow, TState> appendRow,
+        TState state = default!,
+        CancellationToken ct = default)
+    {
+        // DuckDB appenders use the transaction context of the owning connection.
+        using DuckDBAppender appender = connection.CreateAppender(tableName);
+        foreach (TRow row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            IDuckDBAppenderRow appenderRow = appender.CreateRow();
+            appendRow(appenderRow, row, state);
+            appenderRow.EndRow();
         }
 
         appender.Close();
@@ -1004,9 +1032,7 @@ internal static class DuckDbStorageHelper
 
     private static string BuildCreateTableSql(string tableName, IReadOnlyList<PropertyInfo> properties, string? keyColumn)
     {
-        List<string> columns = [];
-        foreach (PropertyInfo property in properties)
-            columns.Add($"{QuoteIdentifier(property.Name)} {MapDuckDbType(property.PropertyType)}");
+        List<string> columns = [BuildColumnDefinitionsSql(properties)];
 
         if (!string.IsNullOrWhiteSpace(keyColumn))
             columns.Add($"PRIMARY KEY ({QuoteIdentifier(keyColumn)})");
@@ -1014,12 +1040,18 @@ internal static class DuckDbStorageHelper
         return $"CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} ({string.Join(", ", columns)});";
     }
 
-    private static string BuildInsertSql(string tableName, IReadOnlyList<PropertyInfo> properties)
-    {
-        string[] columns = properties.Select(property => QuoteIdentifier(property.Name)).ToArray();
-        string[] parameters = properties.Select(_ => "?").ToArray();
-        return $"INSERT INTO {QuoteIdentifier(tableName)} ({string.Join(", ", columns)}) VALUES ({string.Join(", ", parameters)});";
-    }
+    private static string BuildColumnDefinitionsSql(IReadOnlyList<PropertyInfo> properties)
+        => string.Join(", ", properties.Select(property => $"{QuoteIdentifier(property.Name)} {MapDuckDbType(property.PropertyType)}"));
+
+    private static string BuildColumnListSql(IReadOnlyList<PropertyInfo> properties)
+        => string.Join(", ", properties.Select(property => QuoteIdentifier(property.Name)));
+
+    private static void CreateTemporaryTable(DuckDBConnection connection, string tableName, string columnDefinitions)
+        => ExecuteDuckDbNonQuery(connection, $"""
+            CREATE TEMP TABLE {QuoteIdentifier(tableName)} (
+                {columnDefinitions}
+            );
+            """);
 
     private static string BuildMaxDateTimeSql(string tableName, string columnName, IReadOnlyDictionary<string, object?>? filters)
     {
@@ -1098,6 +1130,42 @@ internal static class DuckDbStorageHelper
         return value;
     }
 
+    private static void AppendDbValue(IDuckDBAppenderRow row, object value)
+    {
+        switch (value)
+        {
+            case DBNull:
+                row.AppendNullValue();
+                break;
+            case string text:
+                row.AppendValue(text);
+                break;
+            case bool boolean:
+                row.AppendValue(boolean);
+                break;
+            case int int32:
+                row.AppendValue(int32);
+                break;
+            case long int64:
+                row.AppendValue(int64);
+                break;
+            case double doubleValue:
+                row.AppendValue(doubleValue);
+                break;
+            case float singleValue:
+                row.AppendValue(singleValue);
+                break;
+            case DateTime dateTime:
+                row.AppendValue(dateTime);
+                break;
+            case decimal decimalValue:
+                row.AppendValue(decimalValue);
+                break;
+            default:
+                throw new NotSupportedException($"Unsupported appender value type: {value.GetType().FullName}");
+        }
+    }
+
     private static string MapDuckDbType(Type type)
     {
         Type underlyingType = Nullable.GetUnderlyingType(type) ?? type;
@@ -1123,33 +1191,6 @@ internal static class DuckDbStorageHelper
             return "VARCHAR";
 
         throw new NotSupportedException($"Unsupported DuckDB type: {type.FullName}");
-    }
-
-    private static DbType MapDbType(Type type)
-    {
-        Type underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-        if (underlyingType.IsEnum)
-            return DbType.String;
-        if (underlyingType == typeof(string))
-            return DbType.String;
-        if (underlyingType == typeof(bool))
-            return DbType.Boolean;
-        if (underlyingType == typeof(int))
-            return DbType.Int32;
-        if (underlyingType == typeof(long))
-            return DbType.Int64;
-        if (underlyingType == typeof(double))
-            return DbType.Double;
-        if (underlyingType == typeof(float))
-            return DbType.Single;
-        if (underlyingType == typeof(DateTime))
-            return DbType.DateTime;
-        if (underlyingType == typeof(decimal))
-            return DbType.Decimal;
-        if (underlyingType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(underlyingType))
-            return DbType.String;
-
-        throw new NotSupportedException($"Unsupported DB parameter type: {type.FullName}");
     }
 
     private static string QuoteIdentifier(string identifier)

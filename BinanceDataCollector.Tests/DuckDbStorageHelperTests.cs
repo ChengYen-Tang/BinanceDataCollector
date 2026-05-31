@@ -260,6 +260,68 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
+    public async Task ReplaceTableAsync_WhenAppenderInsertFails_RollsBackPriorDelete()
+    {
+        string dbPath = CreateDbPath();
+        UpsertRecord[] initial =
+        [
+            new() { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }
+        ];
+        UpsertRecord[] duplicatedReplacement =
+        [
+            new() { Id = "2", Name = "ETHUSDT", OccurredAt = new DateTime(2026, 05, 02, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Id = "2", Name = "ETHUSDT-DUP", OccurredAt = new DateTime(2026, 05, 03, 0, 0, 0, DateTimeKind.Utc) }
+        ];
+
+        await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Symbols", initial, nameof(UpsertRecord.Id), recreateTable: true);
+
+        await Assert.ThrowsExactlyAsync<DuckDBException>(async () =>
+            await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Symbols", duplicatedReplacement, nameof(UpsertRecord.Id), recreateTable: false));
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Name FROM Symbols ORDER BY Id;";
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual("1", reader.GetString(0));
+        Assert.AreEqual("BTCUSDT", reader.GetString(1));
+        Assert.IsFalse(await reader.ReadAsync());
+    }
+
+    [TestMethod]
+    public async Task UpsertRowsAsync_WhenAppenderInsertFails_RollsBackDeleteAndPreservesExistingRows()
+    {
+        string dbPath = CreateDbPath();
+        UpsertRecord[] initial =
+        [
+            new() { Id = "1", Name = "BTCUSDT", OccurredAt = new DateTime(2026, 05, 01, 0, 0, 0, DateTimeKind.Utc) }
+        ];
+        UpsertRecord[] duplicatedIncoming =
+        [
+            new() { Id = "1", Name = "BTCUSDT-V2", OccurredAt = new DateTime(2026, 05, 02, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Id = "1", Name = "BTCUSDT-V3", OccurredAt = new DateTime(2026, 05, 03, 0, 0, 0, DateTimeKind.Utc) }
+        ];
+
+        await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Symbols", initial, nameof(UpsertRecord.Id), recreateTable: true);
+
+        await Assert.ThrowsExactlyAsync<DuckDBException>(async () =>
+            await DuckDbStorageHelper.UpsertRowsAsync(dbPath, "Symbols", duplicatedIncoming, nameof(UpsertRecord.Id)));
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Name FROM Symbols ORDER BY Id;";
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual("1", reader.GetString(0));
+        Assert.AreEqual("BTCUSDT", reader.GetString(1));
+        Assert.IsFalse(await reader.ReadAsync());
+    }
+
+    [TestMethod]
     public async Task UpsertRowsAsync_WhenKeyColumnDoesNotExist_ThrowsInvalidOperationException()
     {
         string dbPath = CreateDbPath();
