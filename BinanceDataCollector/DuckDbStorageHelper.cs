@@ -47,7 +47,9 @@ internal static class DuckDbStorageHelper
             BatchTempTables tempTables = CreateGenericBatchTables(connection, properties);
             try
             {
-                AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, ct);
+                // After the DuckDB mutation starts, cancellation is intentionally
+                // ignored so a batch cannot be half-written into the database.
+                AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, CancellationToken.None);
 
                 using DuckDBTransaction transaction = connection.BeginTransaction();
 
@@ -56,10 +58,10 @@ internal static class DuckDbStorageHelper
                     using DuckDBCommand dropCommand = connection.CreateCommand();
                     dropCommand.Transaction = transaction;
                     dropCommand.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
-                    await dropCommand.ExecuteNonQueryAsync(ct);
+                    await dropCommand.ExecuteNonQueryAsync(CancellationToken.None);
                 }
 
-                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, CancellationToken.None);
                 DeleteAllRows(connection, transaction, tableName);
                 InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
                 transaction.Commit();
@@ -92,10 +94,12 @@ internal static class DuckDbStorageHelper
             BatchTempTables tempTables = CreateGenericBatchTables(connection, properties);
             try
             {
-                AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, ct);
+                // After the DuckDB mutation starts, cancellation is intentionally
+                // ignored so a batch cannot be half-written into the database.
+                AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, CancellationToken.None);
 
                 using DuckDBTransaction transaction = connection.BeginTransaction();
-                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, ct);
+                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, CancellationToken.None);
                 DeleteRowsByJoinKey(connection, transaction, tableName, tempTables.RowsTableName, keyProperty.Name);
                 InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
                 transaction.Commit();
@@ -201,6 +205,7 @@ internal static class DuckDbStorageHelper
         // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
+            ct.ThrowIfCancellationRequested();
             if (!File.Exists(normalizedPath))
                 return;
 
@@ -214,7 +219,7 @@ internal static class DuckDbStorageHelper
             parameter.DbType = DbType.DateTime;
             parameter.Value = threshold;
             command.Parameters.Add(parameter);
-            await command.ExecuteNonQueryAsync(ct);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
         });
     }
 
@@ -225,6 +230,7 @@ internal static class DuckDbStorageHelper
         // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
+            ct.ThrowIfCancellationRequested();
             if (!File.Exists(normalizedPath))
                 return;
 
@@ -238,7 +244,7 @@ internal static class DuckDbStorageHelper
             parameter.DbType = DbType.Int64;
             parameter.Value = threshold;
             command.Parameters.Add(parameter);
-            await command.ExecuteNonQueryAsync(ct);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
         });
     }
 
@@ -249,13 +255,14 @@ internal static class DuckDbStorageHelper
         // finish consistently rather than abandoning the mutation mid-pipeline.
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
+            ct.ThrowIfCancellationRequested();
             if (!File.Exists(normalizedPath))
                 return;
 
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             using DuckDBCommand command = connection.CreateCommand();
             command.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
-            await command.ExecuteNonQueryAsync(ct);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
         });
     }
 
@@ -334,6 +341,7 @@ internal static class DuckDbStorageHelper
         await WithConnectionAsync(dbPath, async connection =>
         {
             ct.ThrowIfCancellationRequested();
+            // Once checkpoint starts, do not let cancellation interrupt it midway.
             ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
             await Task.CompletedTask;
         }, ct);
@@ -368,22 +376,42 @@ internal static class DuckDbStorageHelper
     }
 
     public static void CloseAllConnections()
+        => ExecuteExclusiveAsync(static () => Task.CompletedTask).GetAwaiter().GetResult();
+
+    public static async Task ExecuteExclusiveAsync(Func<Task> action, CancellationToken ct = default)
     {
-        lock (LifecycleSync)
+        BeginExclusiveMode();
+        try
         {
-            isClosing = true;
-            if (activeOperations == 0)
-                NoActiveOperations.Set();
+            NoActiveOperations.Wait(ct);
+            await action();
         }
-
-        NoActiveOperations.Wait();
-
-        lock (LifecycleSync)
+        finally
         {
-            isClosing = false;
-            NoActiveOperations.Set();
+            EndExclusiveMode();
         }
     }
+
+    public static Task CheckpointStorageAsync(string storageRootPath, CancellationToken ct = default)
+        => ExecuteExclusiveAsync(() =>
+        {
+            if (!Directory.Exists(storageRootPath))
+                return Task.CompletedTask;
+
+            foreach (string dbPath in Directory.EnumerateFiles(storageRootPath, "*.duckdb", SearchOption.AllDirectories))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                string normalizedPath = Path.GetFullPath(dbPath);
+                if (!File.Exists(normalizedPath))
+                    continue;
+
+                using DuckDBConnection connection = OpenConnection(normalizedPath);
+                ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
+            }
+
+            return Task.CompletedTask;
+        }, ct);
 
     private static DuckDBConnection OpenConnection(string normalizedPath)
     {
@@ -394,6 +422,25 @@ internal static class DuckDbStorageHelper
         DuckDBConnection connection = new($"Data Source={normalizedPath}");
         connection.Open();
         return connection;
+    }
+
+    private static void BeginExclusiveMode()
+    {
+        lock (LifecycleSync)
+        {
+            isClosing = true;
+            if (activeOperations == 0)
+                NoActiveOperations.Set();
+        }
+    }
+
+    private static void EndExclusiveMode()
+    {
+        lock (LifecycleSync)
+        {
+            isClosing = false;
+            NoActiveOperations.Set();
+        }
     }
 
     private static async Task WithTableLockAsync(string dbPath, string tableName, Func<string, Task> action, CancellationToken ct = default)
@@ -510,10 +557,11 @@ internal static class DuckDbStorageHelper
         string? keyColumn,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         using DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = BuildCreateTableSql(tableName, properties, keyColumn);
-        await command.ExecuteNonQueryAsync(ct);
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
     private static void DeleteAllRows(DuckDBConnection connection, DuckDBTransaction transaction, string tableName)

@@ -27,7 +27,16 @@ internal static class DuckDbStorageArchiveHelper
         DeleteFileIfExists(ArchivePath);
         DeleteFileIfExists(HashPath);
 
-        ZipFile.CreateFromDirectory(StorageRootPath, ArchivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
+        try
+        {
+            await CreateArchiveFromDirectoryAsync(StorageRootPath, ArchivePath, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            DeleteFileIfExists(ArchivePath);
+            DeleteFileIfExists(HashPath);
+            throw;
+        }
 
         string hashText = await ComputeSha256Async(ArchivePath, ct);
         await File.WriteAllTextAsync(HashPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);
@@ -45,5 +54,22 @@ internal static class DuckDbStorageArchiveHelper
         await using FileStream stream = File.OpenRead(path);
         byte[] hash = await SHA256.HashDataAsync(stream, ct);
         return Convert.ToHexString(hash);
+    }
+
+    private static async Task CreateArchiveFromDirectoryAsync(string sourceDirectory, string destinationPath, CancellationToken ct)
+    {
+        await using FileStream archiveStream = new(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using ZipArchive archive = new(archiveStream, ZipArchiveMode.Create);
+
+        foreach (string filePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string entryName = Path.GetRelativePath(sourceDirectory, filePath).Replace(Path.DirectorySeparatorChar, '/');
+            ZipArchiveEntry entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+            await using Stream entryStream = entry.Open();
+            await using FileStream sourceStream = File.OpenRead(filePath);
+            await sourceStream.CopyToAsync(entryStream, ct);
+        }
     }
 }

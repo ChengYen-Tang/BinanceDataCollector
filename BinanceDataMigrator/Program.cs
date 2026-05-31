@@ -18,7 +18,9 @@ IHost host = Host.CreateDefaultBuilder(args)
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 
         services.Configure<MigrationOptions>(hostContext.Configuration.GetSection(MigrationOptions.SectionName));
-        services.AddDbContext<BinanceDbContext>(options => options.UseSqlServer(connectionString));
+        services.AddDbContext<BinanceDbContext>(options => options.UseSqlServer(
+            connectionString,
+            sqlOptions => sqlOptions.CommandTimeout(MigrationTimeouts.SqlServerCommandTimeoutSeconds)));
         services.AddSingleton<IBinanceRestClient>(_ => BinanceRepairDownloader.CreateClient());
         services.AddSingleton<BinanceRepairDownloader>();
         services.AddSingleton<SqlServerToDuckDbMigrator>();

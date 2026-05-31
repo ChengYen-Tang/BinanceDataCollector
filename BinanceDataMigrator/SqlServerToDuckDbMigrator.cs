@@ -631,6 +631,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         await connection.OpenAsync(ct);
 
         await using SqlCommand command = connection.CreateCommand();
+        command.CommandTimeout = MigrationTimeouts.SqlServerCommandTimeoutSeconds;
         command.CommandText = $"SELECT * FROM [dbo].[{EscapeSqlIdentifier(physicalTableName)}] ORDER BY [{EscapeSqlIdentifier(keyColumn)}];";
 
         await using DbDataReader reader = await command.ExecuteReaderAsync(ct);
@@ -646,6 +647,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         await connection.OpenAsync(ct);
 
         await using SqlCommand command = connection.CreateCommand();
+        command.CommandTimeout = MigrationTimeouts.SqlServerCommandTimeoutSeconds;
         command.CommandText = "SELECT CASE WHEN OBJECT_ID(@tableName, N'U') IS NULL THEN 0 ELSE 1 END;";
         command.Parameters.AddWithValue("@tableName", $"[dbo].[{physicalTableName}]");
 

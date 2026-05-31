@@ -31,13 +31,15 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-        productionLine.Stop();
         backgroundJobServer.Dispose();
+        hangfireJob.RequestStop();
         cts.Cancel();
+        await productionLine.StopAsync(CancellationToken.None);
+        await hangfireJob.WaitForIdleAsync(CancellationToken.None);
+        await DuckDbStorageHelper.CheckpointStorageAsync(DuckDbStorageArchiveHelper.StorageRootPath, CancellationToken.None);
         logger.LogInformation("Worker stopped at: {time}", DateTimeOffset.Now);
-        return Task.CompletedTask;
     }
 }
 
@@ -53,45 +55,91 @@ public class HangfireJob
 {
     private readonly ILogger<HangfireJob> logger;
     private readonly IServiceProvider serviceProvider;
+    private readonly Lock runStateLock = new();
 
-    private static volatile bool isRunning = false;
+    private bool isRunning;
+    private bool isStopping;
+    private TaskCompletionSource idleTaskCompletionSource = CreateCompletedIdleTaskCompletionSource();
 
     public HangfireJob(ILogger<HangfireJob> logger, IServiceProvider serviceProvider) =>
         (this.logger, this.serviceProvider) = (logger, serviceProvider);
 
     public async Task RunJob(CancellationToken ct)
     {
-        if (isRunning)
-            return;
+        lock (runStateLock)
+        {
+            if (isRunning || isStopping)
+                return;
+
+            isRunning = true;
+            idleTaskCompletionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
         logger.LogInformation("HangfireJob running at: {time}", DateTimeOffset.Now);
-        isRunning = true;
         try
         {
             using IServiceScope scope = serviceProvider.CreateScope();
             IServiceProvider scopeServiceProvider = scope.ServiceProvider;
+            ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
+            productionLine.ResetEvent();
             ICollectorController[] controllers = scopeServiceProvider.GetServices<ICollectorController>().ToArray();
             foreach (ICollectorController controller in controllers)
                 await controller.GatherAsync(ct);
-            ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
             logger.LogInformation("Waiting for production line to finish at: {time}", DateTimeOffset.Now);
-            productionLine.Wait();
+            bool productionLineCompleted = productionLine.Wait(ct);
+            if (!productionLineCompleted)
+            {
+                logger.LogInformation("Production line wait canceled at: {time}", DateTimeOffset.Now);
+                return;
+            }
             logger.LogInformation("Production line finished at: {time}", DateTimeOffset.Now);
-            productionLine.ResetEvent();
 
             await PackageDuckDbArchiveAsync(ct);
         }
         finally
         {
-            isRunning = false;
+            lock (runStateLock)
+            {
+                isRunning = false;
+                idleTaskCompletionSource.TrySetResult();
+            }
             logger.LogInformation("HangfireJob stopped at: {time}", DateTimeOffset.Now);
         }
     }
 
+    public Task WaitForIdleAsync(CancellationToken ct = default)
+    {
+        Task waitTask;
+        lock (runStateLock)
+            waitTask = idleTaskCompletionSource.Task;
+
+        return waitTask.WaitAsync(ct);
+    }
+
+    public void RequestStop()
+    {
+        lock (runStateLock)
+            isStopping = true;
+    }
+
     private async Task PackageDuckDbArchiveAsync(CancellationToken ct)
     {
+        lock (runStateLock)
+        {
+            if (isStopping)
+                return;
+        }
+
+        ct.ThrowIfCancellationRequested();
         logger.LogInformation("Start packaging DuckDB archive at: {time}", DateTimeOffset.Now);
         bool packaged = await DuckDbStorageArchiveHelper.FinalizeArchiveAsync(logger, ct);
         if (packaged)
             logger.LogInformation("Finish packaging DuckDB archive at: {time}", DateTimeOffset.Now);
+    }
+
+    private static TaskCompletionSource CreateCompletedIdleTaskCompletionSource()
+    {
+        TaskCompletionSource taskCompletionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        taskCompletionSource.TrySetResult();
+        return taskCompletionSource;
     }
 }

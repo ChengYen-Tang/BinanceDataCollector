@@ -10,6 +10,7 @@ internal class ProductionLine
     private readonly List<Task> tasks;
     private readonly ManualResetEvent deleteWaitEvent;
     private readonly ManualResetEvent productionLineWaitEvent;
+    private readonly ManualResetEvent stopWaitEvent;
     private bool isRunning;
     private volatile int deleteWorkItemCount;
     private CancellationTokenSource cancellationTokenSource = null!;
@@ -22,8 +23,8 @@ internal class ProductionLine
     public readonly Channel<IAsymcWorkItem> DeleteChannel;
 
     public ProductionLine(IConfiguration configuration, ILogger<ProductionLine> logger)
-        => (this.configuration, this.logger, GetLastTimeChannel, GatherChannel, InsertChannel, DeleteChannel, tasks, isRunning, deleteWaitEvent, productionLineWaitEvent)
-        = (configuration, logger, Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateBounded<IAsymcWorkItem>(10), Channel.CreateUnbounded<IAsymcWorkItem>(), [], false, new(false), new(false));
+        => (this.configuration, this.logger, GetLastTimeChannel, GatherChannel, InsertChannel, DeleteChannel, tasks, isRunning, deleteWaitEvent, productionLineWaitEvent, stopWaitEvent)
+        = (configuration, logger, Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateUnbounded<IAsymcWorkItem>(), Channel.CreateBounded<IAsymcWorkItem>(10), Channel.CreateUnbounded<IAsymcWorkItem>(), [], false, new(false), new(false), new(false));
 
     public void Start()
     {
@@ -34,32 +35,33 @@ internal class ProductionLine
         int deleteKlineWorkerCount = configuration.GetValue("ProductionLine:DeleteKlineWorkerCount", 1);
         cancellationTokenSource = new();
         for (int i = 0; i < getLastTimeWorkerCount; i++)
-            tasks.Add(Task.Factory.StartNew(GetLastTimeProcessAsync, TaskCreationOptions.LongRunning));
-        tasks.Add(Task.Factory.StartNew(GatherKlineProcessAsync, TaskCreationOptions.LongRunning));
+            tasks.Add(StartWorker(GetLastTimeProcessAsync));
+        tasks.Add(StartWorker(GatherKlineProcessAsync));
         lastProcessState = new ProcessState[insertKlineWorkerCount];
         for (int i = 0; i < insertKlineWorkerCount; i++)
         {
             int index = i;
-            tasks.Add(Task.Factory.StartNew(() => InsertKlineProcessAsync(index), TaskCreationOptions.LongRunning));
+            tasks.Add(StartWorker(() => InsertKlineProcessAsync(index)));
             lastProcessState[i] = new();
         }
         deleteProcessState = new ProcessState[deleteKlineWorkerCount];
         for (int i = 0; i < deleteKlineWorkerCount; i++)
         {
             int index = i;
-            tasks.Add(Task.Factory.StartNew(() => DeleteKlineProcessAsync(index), TaskCreationOptions.LongRunning));
+            tasks.Add(StartWorker(() => DeleteKlineProcessAsync(index)));
             deleteProcessState[i] = new();
         }
         ResetEvent();
         isRunning = true;
     }
 
-    public void Stop()
+    public async Task StopAsync(CancellationToken ct = default)
     {
         if (!isRunning)
             return;
+        stopWaitEvent.Set();
         cancellationTokenSource.Cancel();
-        Task.WaitAll([.. tasks]);
+        await Task.WhenAll(tasks).WaitAsync(ct);
         cancellationTokenSource.Dispose();
         tasks.Clear();
         isRunning = false;
@@ -70,28 +72,38 @@ internal class ProductionLine
         deleteWorkItemCount = 0;
         deleteWaitEvent.Reset();
         productionLineWaitEvent.Reset();
+        stopWaitEvent.Reset();
     }
 
-    public void Wait()
-        => productionLineWaitEvent.WaitOne();
+    public bool Wait(CancellationToken ct = default)
+    {
+        int signaledHandle = WaitHandle.WaitAny([productionLineWaitEvent, ct.WaitHandle]);
+        return signaledHandle == 0;
+    }
 
     private async Task GetLastTimeProcessAsync()
     {
         logger.LogInformation("GetLastTimeProcessAsync started");
-        while (await GetLastTimeChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
+        try
         {
-            if (GetLastTimeChannel.Reader.TryRead(out IAsymcWorkItem? item))
+            while (await GetLastTimeChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
             {
-                try
+                if (GetLastTimeChannel.Reader.TryRead(out IAsymcWorkItem? item))
                 {
-                    await item.Run();
+                    try
+                    {
+                        await item.Run();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "GetLastTimeProcessAsync error. WorkItem: {WorkItem}", item.Description);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "GetLastTimeProcessAsync error. WorkItem: {WorkItem}", item.Description);
-                }
+                logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
             }
-            logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
         }
         logger.LogInformation("GetLastTimeProcessAsync stopped");
     }
@@ -99,20 +111,26 @@ internal class ProductionLine
     private async Task GatherKlineProcessAsync()
     {
         logger.LogInformation("GatherKlineProcessAsync started");
-        while (await GatherChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
+        try
         {
-            if (GatherChannel.Reader.TryRead(out IAsymcWorkItem? item))
+            while (await GatherChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
             {
-                try
+                if (GatherChannel.Reader.TryRead(out IAsymcWorkItem? item))
                 {
-                    await item.Run();
+                    try
+                    {
+                        await item.Run();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "GatherKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "GatherKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
-                }
+                logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
             }
-            logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
         }
         logger.LogInformation("GatherKlineProcessAsync stopped");
     }
@@ -120,28 +138,34 @@ internal class ProductionLine
     private async Task InsertKlineProcessAsync(int index)
     {
         logger.LogInformation("InsertKlineProcessAsync started");
-        while (await InsertChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
+        try
         {
-            if (InsertChannel.Reader.TryRead(out IAsymcWorkItem? item))
+            while (await InsertChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
             {
-                lock (lastProcessState[index].Lock)
-                    lastProcessState[index].State = true;
-                try
+                if (InsertChannel.Reader.TryRead(out IAsymcWorkItem? item))
                 {
-                    await item.Run();
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "InsertKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
-                }
-                lock (lastProcessState[index].Lock)
-                    lastProcessState[index].State = false;
+                    lock (lastProcessState[index].Lock)
+                        lastProcessState[index].State = true;
+                    try
+                    {
+                        await item.Run();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "InsertKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
+                    }
+                    lock (lastProcessState[index].Lock)
+                        lastProcessState[index].State = false;
 
-                logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
+                    logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
 
-                if (lastProcessState.All(x => { lock (x.Lock) return !x.State; }) && InsertChannel.Reader.Count == 0 && GatherChannel.Reader.Count == 0 && GetLastTimeChannel.Reader.Count == 0)
-                    deleteWaitEvent.Set();
+                    if (lastProcessState.All(x => { lock (x.Lock) return !x.State; }) && InsertChannel.Reader.Count == 0 && GatherChannel.Reader.Count == 0 && GetLastTimeChannel.Reader.Count == 0)
+                        deleteWaitEvent.Set();
+                }
             }
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
         }
         logger.LogInformation("InsertKlineProcessAsync stopped");
     }
@@ -149,38 +173,49 @@ internal class ProductionLine
     private async Task DeleteKlineProcessAsync(int index)
     {
         logger.LogInformation("DeleteKlineProcessAsync started");
-        while (await DeleteChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
+        try
         {
-            deleteWaitEvent.WaitOne();
-            if (DeleteChannel.Reader.TryRead(out IAsymcWorkItem? item))
+            while (await DeleteChannel.Reader.WaitToReadAsync(cancellationTokenSource.Token))
             {
-                lock (deleteProcessState[index].Lock)
-                    deleteProcessState[index].State = true;
-                try
+                int signaledHandle = WaitHandle.WaitAny([deleteWaitEvent, stopWaitEvent]);
+                if (signaledHandle == 1)
+                    break;
+                if (DeleteChannel.Reader.TryRead(out IAsymcWorkItem? item))
                 {
-                    await item.Run();
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "DeleteKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
-                }
-                lock (deleteProcessState[index].Lock)
-                    deleteProcessState[index].State = false;
-                Interlocked.Increment(ref deleteWorkItemCount);
-                logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
+                    lock (deleteProcessState[index].Lock)
+                        deleteProcessState[index].State = true;
+                    try
+                    {
+                        await item.Run();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "DeleteKlineProcessAsync error. WorkItem: {WorkItem}", item.Description);
+                    }
+                    lock (deleteProcessState[index].Lock)
+                        deleteProcessState[index].State = false;
+                    Interlocked.Increment(ref deleteWorkItemCount);
+                    logger.LogInformation($"The number of pending tasks:: GetLastTimeChannel:{GetLastTimeChannel.Reader.Count}, GatherChannel:{GatherChannel.Reader.Count}, InsertChannel:{InsertChannel.Reader.Count}, DeleteChannel:{DeleteChannel.Reader.Count}");
 
-                bool spotEnabled = configuration.GetValue("Market:Spot:IsEnabled", true);
-                bool coinFuturesEnabled = configuration.GetValue("Market:CoinFutures:IsEnabled", true);
-                bool usdFuturesEnabled = configuration.GetValue("Market:UsdFutures:IsEnabled", true);
-                int requiredDeleteWorkItemCount = Convert.ToInt32(spotEnabled)
-                    + Convert.ToInt32(coinFuturesEnabled)
-                    + Convert.ToInt32(usdFuturesEnabled);
-                if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteChannel.Reader.Count == 0 && deleteWorkItemCount == requiredDeleteWorkItemCount)
-                    productionLineWaitEvent.Set();
+                    bool spotEnabled = configuration.GetValue("Market:Spot:IsEnabled", true);
+                    bool coinFuturesEnabled = configuration.GetValue("Market:CoinFutures:IsEnabled", true);
+                    bool usdFuturesEnabled = configuration.GetValue("Market:UsdFutures:IsEnabled", true);
+                    int requiredDeleteWorkItemCount = Convert.ToInt32(spotEnabled)
+                        + Convert.ToInt32(coinFuturesEnabled)
+                        + Convert.ToInt32(usdFuturesEnabled);
+                    if (deleteProcessState.All(x => { lock (x.Lock) return !x.State; }) && DeleteChannel.Reader.Count == 0 && deleteWorkItemCount == requiredDeleteWorkItemCount)
+                        productionLineWaitEvent.Set();
+                }
             }
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
         }
         logger.LogInformation("DeleteKlineProcessAsync stopped");
     }
+
+    private Task StartWorker(Func<Task> worker)
+        => Task.Factory.StartNew(worker, cancellationTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
     internal class ProcessState
     {
