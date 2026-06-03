@@ -72,36 +72,31 @@ internal abstract class StorageController<T>
 
     protected static List<TModel> ConvertToModelRows<TSource, TModel>(IEnumerable<TSource> source, Action<TSource, TModel> map)
         where TModel : class, new()
-    {
-        List<TModel> rows = new(BinanceApiModelRowsInitialCapacity);
-        foreach (TSource item in source)
-        {
-            TModel row = new();
-            map(item, row);
-            rows.Add(row);
-        }
-        return rows;
-    }
+        => [.. source
+            .AsParallel()
+            .AsOrdered()
+            .Select(item =>
+            {
+                TModel row = new();
+                map(item, row);
+                return row;
+            })];
 
     protected static List<TModel> ConvertToModelRows<TSource, TModel>(
         IEnumerable<TSource> source,
         Func<TSource, bool> predicate,
         Action<TSource, TModel> map)
         where TModel : class, new()
-    {
-        List<TModel> rows = new(BinanceApiModelRowsInitialCapacity);
-        foreach (TSource item in source)
-        {
-            if (predicate(item))
+        => [.. source
+            .AsParallel()
+            .AsOrdered()
+            .Where(predicate)
+            .Select(item =>
             {
                 TModel row = new();
                 map(item, row);
-                rows.Add(row);
-            }
-        }
-
-        return rows;
-    }
+                return row;
+            })];
 
     protected static List<TModel> ConvertToMarketRows<TSource, TModel>(IEnumerable<TSource> source, Action<TSource, TModel> map)
         where TModel : class, new()

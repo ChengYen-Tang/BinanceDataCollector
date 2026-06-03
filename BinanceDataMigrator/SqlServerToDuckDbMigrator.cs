@@ -96,7 +96,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         await DuckDbStorageHelper.ReplaceTableAsync(
             GetSymbolInfoDbPath(),
             "Spot",
-            symbols.Select(MapSpotSymbolInfo).ToArray(),
+            symbols.AsParallel().AsOrdered().Select(MapSpotSymbolInfo).ToArray(),
             nameof(SymbolInfoCsv.Name),
             recreateTable: true,
             ct);
@@ -128,7 +128,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         await DuckDbStorageHelper.ReplaceTableAsync(
             GetSymbolInfoDbPath(),
             "CoinFutures",
-            symbols.Select(MapCoinFuturesSymbolInfo).ToArray(),
+            symbols.AsParallel().AsOrdered().Select(MapCoinFuturesSymbolInfo).ToArray(),
             nameof(SymbolInfoCsv.Name),
             recreateTable: true,
             ct);
@@ -148,7 +148,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         await DuckDbStorageHelper.ReplaceTableAsync(
             GetSymbolInfoDbPath(),
             "UsdFutures",
-            symbols.Select(MapUsdFuturesSymbolInfo).ToArray(),
+            symbols.AsParallel().AsOrdered().Select(MapUsdFuturesSymbolInfo).ToArray(),
             nameof(SymbolInfoCsv.Name),
             recreateTable: true,
             ct);
