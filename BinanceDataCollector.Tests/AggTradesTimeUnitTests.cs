@@ -79,7 +79,7 @@ public sealed class AggTradesTimeUnitTests
         public override Task DeleteOldData(CancellationToken ct = default) => throw new NotSupportedException();
         protected override string GetSymbolName(object symbol) => throw new NotSupportedException();
         protected override Task<List<string>> GetExistingSymbolNamesAsync(CancellationToken ct = default) => throw new NotSupportedException();
-        protected override Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default) => throw new NotSupportedException();
+        protected override Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default) => throw new NotSupportedException();
         protected override Task<FluentResults.Result<List<object>>> GetMarketAsync(CancellationToken ct = default) => throw new NotSupportedException();
         protected override Task<FluentResults.Result<BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch>> GetAggTradesAsync(object symbol, DateTime downloadStartTime, CancellationToken ct = default) => throw new NotSupportedException();
         protected override Task<FluentResults.Result<BinanceDataCollector.Collectors.BinanceMarketData.MarketDataDownloadBatch>> GetBookDepthAsync(object symbol, DateTime downloadStartTime, CancellationToken ct = default) => throw new NotSupportedException();

@@ -132,13 +132,10 @@ internal abstract class StorageController<T>
             upsertStopwatch.Stop();
             logger.LogInformation("Finish upserting {SymbolType}. Cost: {ElapsedMs}ms", typeof(T).Name, upsertStopwatch.ElapsedMilliseconds);
 
-            if (delistedSymbols.Length > 0)
-            {
-                Stopwatch deleteStopwatch = Stopwatch.StartNew();
-                await DeleteDelistedSymbolsAsync(delistedSymbols, ct);
-                deleteStopwatch.Stop();
-                logger.LogDebug("Finish deleting delisted {SymbolType}. Count: {DelistedCount}, Cost: {ElapsedMs}ms", typeof(T).Name, delistedSymbols.Length, deleteStopwatch.ElapsedMilliseconds);
-            }
+            Stopwatch deleteStopwatch = Stopwatch.StartNew();
+            await DeleteDelistedSymbolsAsync(currentSymbols, delistedSymbols, ct);
+            deleteStopwatch.Stop();
+            logger.LogDebug("Finish deleting stale {SymbolType} storage. DelistedCount: {DelistedCount}, Cost: {ElapsedMs}ms", typeof(T).Name, delistedSymbols.Length, deleteStopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -625,16 +622,24 @@ internal abstract class StorageController<T>
     protected Task<List<string>> GetStoredSymbolNamesAsync(CancellationToken ct = default)
         => DuckDbStorageHelper.GetStringValuesAsync(SymbolInfoPath, MarketPathSegment, "Name", ct);
 
-    protected async Task DeleteSymbolTablesAsync(IEnumerable<string> dbPaths, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
+    protected async Task DeleteSymbolTablesAsync(IEnumerable<string> dbPaths, IReadOnlyCollection<string> currentSymbols, CancellationToken ct = default)
     {
+        HashSet<string> currentSymbolSet = new(currentSymbols, StringComparer.OrdinalIgnoreCase);
         foreach (string dbPath in dbPaths)
         {
-            foreach (string symbolName in delistedSymbols)
+            List<string> staleTableNames = await GetStaleSymbolTableNamesAsync(dbPath, currentSymbolSet, ct);
+            foreach (string tableName in staleTableNames)
             {
                 ct.ThrowIfCancellationRequested();
-                await DuckDbStorageHelper.DropTableIfExistsAsync(dbPath, symbolName, ct);
+                await DuckDbStorageHelper.DropTableIfExistsAsync(dbPath, tableName, ct);
             }
         }
+    }
+
+    protected async Task<List<string>> GetStaleSymbolTableNamesAsync(string dbPath, IReadOnlySet<string> currentSymbols, CancellationToken ct = default)
+    {
+        List<string> tableNames = await DuckDbStorageHelper.GetTableNamesAsync(dbPath, ct);
+        return [.. tableNames.Where(tableName => !currentSymbols.Contains(tableName))];
     }
 
     protected static long ToUnixMilliseconds(DateTime value)
@@ -656,7 +661,7 @@ internal abstract class StorageController<T>
 
     protected abstract string GetSymbolName(T symbol);
     protected abstract Task<List<string>> GetExistingSymbolNamesAsync(CancellationToken ct = default);
-    protected abstract Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default);
+    protected abstract Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default);
 
     protected abstract Task<Result<List<T>>> GetMarketAsync(CancellationToken ct = default);
 
@@ -719,14 +724,19 @@ internal abstract class StorageController<T>
         return DeleteOldAggTradesRowsAsync(databasePath, symbolName, ct);
     }
 
-    protected async Task DeleteAggTradesStorageAsync(IReadOnlyCollection<string> symbols, CancellationToken ct = default)
+    protected async Task DeleteAggTradesStorageAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        foreach (string symbol in symbols)
+        HashSet<string> currentSymbolSet = new(currentSymbols, StringComparer.OrdinalIgnoreCase);
+        List<string> staleTableNames = await GetStaleSymbolTableNamesAsync(GetAggTradesDatabasePath(), currentSymbolSet, ct);
+        foreach (string tableName in staleTableNames)
         {
             ct.ThrowIfCancellationRequested();
+            await DuckDbStorageHelper.DropTableIfExistsAsync(GetAggTradesDatabasePath(), tableName, ct);
+        }
 
-            await DuckDbStorageHelper.DropTableIfExistsAsync(GetAggTradesDatabasePath(), symbol, ct);
-
+        foreach (string symbol in delistedSymbols)
+        {
+            ct.ThrowIfCancellationRequested();
             string legacySymbolPath = GetLegacyAggTradesSymbolPath(symbol);
             if (Directory.Exists(legacySymbolPath))
                 Directory.Delete(legacySymbolPath, true);
@@ -744,12 +754,14 @@ internal abstract class StorageController<T>
         return DeleteOldBookDepthRowsAsync(databasePath, symbolName, ct);
     }
 
-    protected async Task DeleteBookDepthStorageAsync(IReadOnlyCollection<string> symbols, CancellationToken ct = default)
+    protected async Task DeleteBookDepthStorageAsync(IReadOnlyCollection<string> currentSymbols, CancellationToken ct = default)
     {
-        foreach (string symbol in symbols)
+        HashSet<string> currentSymbolSet = new(currentSymbols, StringComparer.OrdinalIgnoreCase);
+        List<string> staleTableNames = await GetStaleSymbolTableNamesAsync(GetBookDepthDatabasePath(), currentSymbolSet, ct);
+        foreach (string tableName in staleTableNames)
         {
             ct.ThrowIfCancellationRequested();
-            await DuckDbStorageHelper.DropTableIfExistsAsync(GetBookDepthDatabasePath(), symbol, ct);
+            await DuckDbStorageHelper.DropTableIfExistsAsync(GetBookDepthDatabasePath(), tableName, ct);
         }
     }
 

@@ -137,6 +137,35 @@ internal static class DuckDbStorageHelper
         }, ct);
     }
 
+    public static async Task<List<string>> GetTableNamesAsync(string dbPath, CancellationToken ct = default)
+    {
+        string normalizedPath = Path.GetFullPath(dbPath);
+        if (!File.Exists(normalizedPath))
+            return [];
+
+        return await WithConnectionAsync(dbPath, async connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_type = 'BASE TABLE'
+                ORDER BY table_name;
+                """;
+
+            List<string> tableNames = [];
+            await using DbDataReader reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (!reader.IsDBNull(0))
+                    tableNames.Add(reader.GetString(0));
+            }
+
+            return tableNames;
+        }, ct);
+    }
+
     public static async Task<DateTime?> GetMaxDateTimeAsync(
         string dbPath,
         string tableName,

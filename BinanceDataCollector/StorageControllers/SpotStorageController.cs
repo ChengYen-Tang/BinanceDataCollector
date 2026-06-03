@@ -43,10 +43,10 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     protected override Task<List<string>> GetExistingSymbolNamesAsync(CancellationToken ct = default)
         => GetStoredSymbolNamesAsync(ct);
 
-    protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
+    protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        await DeleteSymbolTablesAsync([KlinePath], delistedSymbols, ct);
-        await DeleteAggTradesStorageAsync(delistedSymbols, ct);
+        await DeleteSymbolTablesAsync([KlinePath], currentSymbols, ct);
+        await DeleteAggTradesStorageAsync(currentSymbols, delistedSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)

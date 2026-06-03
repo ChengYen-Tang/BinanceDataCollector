@@ -38,7 +38,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     protected override Task<List<string>> GetExistingSymbolNamesAsync(CancellationToken ct = default)
         => GetStoredSymbolNamesAsync(ct);
 
-    protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
+    protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
         await DeleteSymbolTablesAsync(
         [
@@ -53,9 +53,9 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
             TopLongShortAccountRatioPath,
             GlobalLongShortAccountRatioPath,
             TakerLongShortRatioPath,
-        ], delistedSymbols, ct);
-        await DeleteAggTradesStorageAsync(delistedSymbols, ct);
-        await DeleteBookDepthStorageAsync(delistedSymbols, ct);
+        ], currentSymbols, ct);
+        await DeleteAggTradesStorageAsync(currentSymbols, delistedSymbols, ct);
+        await DeleteBookDepthStorageAsync(currentSymbols, ct);
     }
 
     public override async Task DeleteOldData(CancellationToken ct = default)
