@@ -674,7 +674,6 @@ internal static class DuckDbStorageHelper
         bool sourceIsMicroseconds,
         bool replaceTail)
     {
-        BatchTempTables tempTables = CreateAggTradesBatchTables(connection);
         List<AggTradeImportRow> batchRows = new(MarketDataImportBatchSize);
         Dictionary<long, AggTradeImportRow> batchDedup = new(MarketDataImportBatchSize);
         bool tailDeleted = !replaceTail;
@@ -682,69 +681,53 @@ internal static class DuckDbStorageHelper
             ? GetAggTradesCsvMinTimestamp(csvPath, sourceIsMicroseconds)
             : 0;
 
-        try
+        using StreamReader reader = new(csvPath);
+        while (reader.ReadLine() is { } line)
         {
-            using StreamReader reader = new(csvPath);
-            while (reader.ReadLine() is { } line)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
 
-                AggTradeImportRow row = ParseAggTrade(line.AsSpan(), sourceIsMicroseconds);
-                batchDedup[row.ParquetAggTradeId] = row;
-                if (batchDedup.Count >= MarketDataImportBatchSize)
-                    FlushAggTradeBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
-            }
+            AggTradeImportRow row = ParseAggTrade(line.AsSpan(), sourceIsMicroseconds);
+            batchDedup[row.ParquetAggTradeId] = row;
+            if (batchDedup.Count >= MarketDataImportBatchSize)
+                FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+        }
 
-            FlushAggTradeBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
-        }
-        finally
-        {
-            DropBatchTempTables(connection, tempTables);
-        }
+        FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
     }
 
     private static void ImportBookDepthCsv(DuckDBConnection connection, string tableName, string csvPath)
     {
-        BatchTempTables tempTables = CreateBookDepthBatchTables(connection);
         List<BookDepthImportRow> batchRows = new(MarketDataImportBatchSize);
         Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup = new(MarketDataImportBatchSize);
         bool tailDeleted = false;
         long replaceFrom = GetBookDepthCsvMinTimestamp(csvPath);
 
-        try
+        using StreamReader reader = new(csvPath);
+        bool isFirstLine = true;
+        while (reader.ReadLine() is { } line)
         {
-            using StreamReader reader = new(csvPath);
-            bool isFirstLine = true;
-            while (reader.ReadLine() is { } line)
+            if (isFirstLine)
             {
-                if (isFirstLine)
-                {
-                    isFirstLine = false;
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                BookDepthImportRow row = ParseBookDepth(line.AsSpan());
-                batchDedup[new BookDepthRowKey(row.SnapshotTime, row.Percentage)] = row;
-                if (batchDedup.Count >= MarketDataImportBatchSize)
-                    FlushBookDepthBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+                isFirstLine = false;
+                continue;
             }
 
-            FlushBookDepthBatch(connection, tableName, tempTables, batchRows, batchDedup, ref tailDeleted, replaceFrom);
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            BookDepthImportRow row = ParseBookDepth(line.AsSpan());
+            batchDedup[new BookDepthRowKey(row.SnapshotTime, row.Percentage)] = row;
+            if (batchDedup.Count >= MarketDataImportBatchSize)
+                FlushBookDepthBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
         }
-        finally
-        {
-            DropBatchTempTables(connection, tempTables);
-        }
+
+        FlushBookDepthBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
     }
 
     private static void FlushAggTradeBatch(
         DuckDBConnection connection,
         string tableName,
-        BatchTempTables tempTables,
         List<AggTradeImportRow> batchRows,
         Dictionary<long, AggTradeImportRow> batchDedup,
         ref bool tailDeleted,
@@ -762,44 +745,52 @@ internal static class DuckDbStorageHelper
             return timeCompare != 0 ? timeCompare : x.ParquetAggTradeId.CompareTo(y.ParquetAggTradeId);
         });
 
-        ClearBatchTable(connection, tempTables.RowsTableName);
-        AppendAggTradeRows(connection, tempTables.RowsTableName, batchRows);
-
-        using DuckDBTransaction transaction = connection.BeginTransaction();
-        if (!tailDeleted)
+        BatchTempTables tempTables = CreateAggTradesBatchTables(connection);
+        try
         {
-            using DuckDBCommand deleteTailCommand = connection.CreateCommand();
-            deleteTailCommand.Transaction = transaction;
-            deleteTailCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE transact_time >= $replace_from;";
-            deleteTailCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom));
-            deleteTailCommand.ExecuteNonQuery();
-            tailDeleted = true;
+            AppendAggTradeRows(connection, tempTables.RowsTableName, batchRows);
+
+            using DuckDBTransaction transaction = connection.BeginTransaction();
+            if (!tailDeleted)
+            {
+                using DuckDBCommand deleteTailCommand = connection.CreateCommand();
+                deleteTailCommand.Transaction = transaction;
+                deleteTailCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE transact_time >= $replace_from;";
+                deleteTailCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom));
+                deleteTailCommand.ExecuteNonQuery();
+                tailDeleted = true;
+            }
+
+            using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
+            {
+                deleteByKeyCommand.Transaction = transaction;
+                deleteByKeyCommand.CommandText = $"""
+                    DELETE FROM {QuoteIdentifier(tableName)}
+                    USING {QuoteIdentifier(tempTables.RowsTableName)}
+                    WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = {QuoteIdentifier(tempTables.RowsTableName)}.parquetagg_trade_id;
+                    """;
+                deleteByKeyCommand.ExecuteNonQuery();
+            }
+
+            using (DuckDBCommand insertCommand = connection.CreateCommand())
+            {
+                insertCommand.Transaction = transaction;
+                insertCommand.CommandText = $"""
+                    INSERT INTO {QuoteIdentifier(tableName)}
+                    SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
+                    FROM {QuoteIdentifier(tempTables.RowsTableName)}
+                    ORDER BY transact_time, parquetagg_trade_id;
+                    """;
+                insertCommand.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        finally
+        {
+            DropBatchTempTables(connection, tempTables);
         }
 
-        using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
-        {
-            deleteByKeyCommand.Transaction = transaction;
-            deleteByKeyCommand.CommandText = $"""
-                DELETE FROM {QuoteIdentifier(tableName)}
-                USING {QuoteIdentifier(tempTables.RowsTableName)}
-                WHERE {QuoteIdentifier(tableName)}.parquetagg_trade_id = {QuoteIdentifier(tempTables.RowsTableName)}.parquetagg_trade_id;
-                """;
-            deleteByKeyCommand.ExecuteNonQuery();
-        }
-
-        using (DuckDBCommand insertCommand = connection.CreateCommand())
-        {
-            insertCommand.Transaction = transaction;
-            insertCommand.CommandText = $"""
-                INSERT INTO {QuoteIdentifier(tableName)}
-                SELECT parquetagg_trade_id, price, quantity, first_trade_id, last_trade_id, transact_time, is_buyer_maker
-                FROM {QuoteIdentifier(tempTables.RowsTableName)}
-                ORDER BY transact_time, parquetagg_trade_id;
-                """;
-            insertCommand.ExecuteNonQuery();
-        }
-
-        transaction.Commit();
         batchDedup.Clear();
         batchRows.Clear();
     }
@@ -807,7 +798,6 @@ internal static class DuckDbStorageHelper
     private static void FlushBookDepthBatch(
         DuckDBConnection connection,
         string tableName,
-        BatchTempTables tempTables,
         List<BookDepthImportRow> batchRows,
         Dictionary<BookDepthRowKey, BookDepthImportRow> batchDedup,
         ref bool tailDeleted,
@@ -825,45 +815,53 @@ internal static class DuckDbStorageHelper
             return timeCompare != 0 ? timeCompare : x.Percentage.CompareTo(y.Percentage);
         });
 
-        ClearBatchTable(connection, tempTables.RowsTableName);
-        AppendBookDepthRows(connection, tempTables.RowsTableName, batchRows);
-
-        using DuckDBTransaction transaction = connection.BeginTransaction();
-        if (!tailDeleted)
+        BatchTempTables tempTables = CreateBookDepthBatchTables(connection);
+        try
         {
-            using DuckDBCommand deleteTailCommand = connection.CreateCommand();
-            deleteTailCommand.Transaction = transaction;
-            deleteTailCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE snapshot_time >= $replace_from;";
-            deleteTailCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom));
-            deleteTailCommand.ExecuteNonQuery();
-            tailDeleted = true;
+            AppendBookDepthRows(connection, tempTables.RowsTableName, batchRows);
+
+            using DuckDBTransaction transaction = connection.BeginTransaction();
+            if (!tailDeleted)
+            {
+                using DuckDBCommand deleteTailCommand = connection.CreateCommand();
+                deleteTailCommand.Transaction = transaction;
+                deleteTailCommand.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE snapshot_time >= $replace_from;";
+                deleteTailCommand.Parameters.Add(new DuckDBParameter("replace_from", replaceFrom));
+                deleteTailCommand.ExecuteNonQuery();
+                tailDeleted = true;
+            }
+
+            using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
+            {
+                deleteByKeyCommand.Transaction = transaction;
+                deleteByKeyCommand.CommandText = $"""
+                    DELETE FROM {QuoteIdentifier(tableName)}
+                    USING {QuoteIdentifier(tempTables.RowsTableName)}
+                    WHERE {QuoteIdentifier(tableName)}.snapshot_time = {QuoteIdentifier(tempTables.RowsTableName)}.snapshot_time
+                      AND {QuoteIdentifier(tableName)}.percentage = {QuoteIdentifier(tempTables.RowsTableName)}.percentage;
+                    """;
+                deleteByKeyCommand.ExecuteNonQuery();
+            }
+
+            using (DuckDBCommand insertCommand = connection.CreateCommand())
+            {
+                insertCommand.Transaction = transaction;
+                insertCommand.CommandText = $"""
+                    INSERT INTO {QuoteIdentifier(tableName)}
+                    SELECT snapshot_time, percentage, depth, notional
+                    FROM {QuoteIdentifier(tempTables.RowsTableName)}
+                    ORDER BY snapshot_time, percentage;
+                    """;
+                insertCommand.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        finally
+        {
+            DropBatchTempTables(connection, tempTables);
         }
 
-        using (DuckDBCommand deleteByKeyCommand = connection.CreateCommand())
-        {
-            deleteByKeyCommand.Transaction = transaction;
-            deleteByKeyCommand.CommandText = $"""
-                DELETE FROM {QuoteIdentifier(tableName)}
-                USING {QuoteIdentifier(tempTables.RowsTableName)}
-                WHERE {QuoteIdentifier(tableName)}.snapshot_time = {QuoteIdentifier(tempTables.RowsTableName)}.snapshot_time
-                  AND {QuoteIdentifier(tableName)}.percentage = {QuoteIdentifier(tempTables.RowsTableName)}.percentage;
-                """;
-            deleteByKeyCommand.ExecuteNonQuery();
-        }
-
-        using (DuckDBCommand insertCommand = connection.CreateCommand())
-        {
-            insertCommand.Transaction = transaction;
-            insertCommand.CommandText = $"""
-                INSERT INTO {QuoteIdentifier(tableName)}
-                SELECT snapshot_time, percentage, depth, notional
-                FROM {QuoteIdentifier(tempTables.RowsTableName)}
-                ORDER BY snapshot_time, percentage;
-                """;
-            insertCommand.ExecuteNonQuery();
-        }
-
-        transaction.Commit();
         batchDedup.Clear();
         batchRows.Clear();
     }
@@ -909,13 +907,6 @@ internal static class DuckDbStorageHelper
     {
         long id = Interlocked.Increment(ref tempTableId);
         return new($"{prefix}_{id}_rows");
-    }
-
-    private static void ClearBatchTable(DuckDBConnection connection, string rowsTableName)
-    {
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = $"DELETE FROM {QuoteIdentifier(rowsTableName)};";
-        command.ExecuteNonQuery();
     }
 
     private static void DropBatchTempTables(DuckDBConnection connection, BatchTempTables tempTables)
