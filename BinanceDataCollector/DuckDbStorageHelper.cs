@@ -682,8 +682,16 @@ internal static class DuckDbStorageHelper
             : 0;
 
         using StreamReader reader = new(csvPath);
+        bool isFirstLine = true;
         while (reader.ReadLine() is { } line)
         {
+            if (isFirstLine)
+            {
+                isFirstLine = false;
+                if (IsAggTradesHeader(line.AsSpan()))
+                    continue;
+            }
+
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
@@ -710,7 +718,8 @@ internal static class DuckDbStorageHelper
             if (isFirstLine)
             {
                 isFirstLine = false;
-                continue;
+                if (IsBookDepthHeader(line.AsSpan()))
+                    continue;
             }
 
             if (string.IsNullOrWhiteSpace(line))
@@ -960,8 +969,16 @@ internal static class DuckDbStorageHelper
     {
         long? minTimestamp = null;
         using StreamReader reader = new(csvPath);
+        bool isFirstLine = true;
         while (reader.ReadLine() is { } line)
         {
+            if (isFirstLine)
+            {
+                isFirstLine = false;
+                if (IsAggTradesHeader(line.AsSpan()))
+                    continue;
+            }
+
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
@@ -987,7 +1004,8 @@ internal static class DuckDbStorageHelper
             if (isFirstLine)
             {
                 isFirstLine = false;
-                continue;
+                if (IsBookDepthHeader(line.AsSpan()))
+                    continue;
             }
 
             if (string.IsNullOrWhiteSpace(line))
@@ -1051,6 +1069,12 @@ internal static class DuckDbStorageHelper
 
         throw new FormatException($"CSV line does not contain field index {fieldIndex}.");
     }
+
+    private static bool IsAggTradesHeader(ReadOnlySpan<char> line)
+        => ReadCsvField(line, 0).Equals("agg_trade_id".AsSpan(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBookDepthHeader(ReadOnlySpan<char> line)
+        => ReadCsvField(line, 0).Equals("timestamp".AsSpan(), StringComparison.OrdinalIgnoreCase);
 
     private static void ExecuteDuckDbNonQuery(DuckDBConnection connection, string commandText)
     {
