@@ -102,25 +102,33 @@ internal abstract class StorageController<T>
         where TModel : class, new()
         => ConvertToModelRows(source, map);
 
-    public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
+    public async Task<Result<List<T>>> FetchMarketAsync(CancellationToken ct = default)
     {
         Result<List<T>> result = await GetMarketAsync(ct);
         if (result.IsFailed)
+        {
+            LogMarketSyncFailure(result.Errors[0].Message);
             return Result.Fail(result.Errors);
+        }
 
+        return Result.Ok(result.Value);
+    }
+
+    public async Task<Result> ApplyMarketAsync(IReadOnlyCollection<T> markets, CancellationToken ct = default)
+    {
         try
         {
-            string[] currentSymbols = [.. result.Value.Select(GetSymbolName)];
+            string[] currentSymbols = [.. markets.Select(GetSymbolName)];
             List<string> existingSymbols = await GetExistingSymbolNamesAsync(ct);
             string[] delistedSymbols = [.. existingSymbols.Except(currentSymbols)];
 
-            logger.LogInformation("Start syncing {SymbolType}. MarketCount: {MarketCount}, DelistedCount: {DelistedCount}", typeof(T).Name, result.Value.Count, delistedSymbols.Length);
+            logger.LogInformation("Start syncing {SymbolType}. MarketCount: {MarketCount}, DelistedCount: {DelistedCount}", typeof(T).Name, markets.Count, delistedSymbols.Length);
 
             Stopwatch upsertStopwatch = Stopwatch.StartNew();
             await DuckDbStorageHelper.ReplaceTableAsync(
                 SymbolInfoPath,
                 MarketPathSegment,
-                result.Value.Cast<SymbolInfoCsv>().ToArray(),
+                markets.Cast<SymbolInfoCsv>().ToArray(),
                 nameof(SymbolInfoCsv.Name),
                 true,
                 ct);
@@ -137,6 +145,19 @@ internal abstract class StorageController<T>
             logger.LogError(ex, "Sync {SymbolType} failed", typeof(T).Name);
             return Result.Fail(ex.Message);
         }
+        return Result.Ok();
+    }
+
+    public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
+    {
+        Result<List<T>> result = await FetchMarketAsync(ct);
+        if (result.IsFailed)
+            return result;
+
+        Result applyResult = await ApplyMarketAsync(result.Value, ct);
+        if (applyResult.IsFailed)
+            return Result.Fail(applyResult.Errors);
+
         return Result.Ok(result.Value);
     }
 
@@ -373,6 +394,10 @@ internal abstract class StorageController<T>
         => logger.LogError("Sync failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, StartTime: {StartTime}, Message: {Message}",
             dataType, symbol, interval, startTime, message);
 
+    protected void LogMarketSyncFailure(string message)
+        => logger.LogError("Sync market failed. Market: {Market}, SymbolType: {SymbolType}, Message: {Message}",
+            MarketPathSegment, typeof(T).Name, message);
+
     protected async Task InsertDeduplicatedRowsAsync<TEntity, TKey>(
         string dbPath,
         SymbolRows<TEntity> batch,
@@ -602,13 +627,25 @@ internal abstract class StorageController<T>
         string dbPath,
         string symbolName,
         string columnName,
+        string dataType,
+        KlineInterval? interval = null,
         IReadOnlyDictionary<string, object?>? filters = null,
         CancellationToken ct = default)
     {
-        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, symbolName, columnName, filters, ct);
-        return latest.HasValue
-            ? DateTimeOffset.FromUnixTimeMilliseconds(latest.Value).UtcDateTime
-            : yearsReserved;
+        try
+        {
+            long? latest = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, symbolName, columnName, filters, ct);
+            return latest.HasValue
+                ? DateTimeOffset.FromUnixTimeMilliseconds(latest.Value).UtcDateTime
+                : yearsReserved;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Get last time failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, Column: {Column}, DatabasePath: {DatabasePath}",
+                dataType, symbolName, interval, columnName, dbPath);
+            throw;
+        }
     }
 
     protected async Task DeleteSymbolRowsBeforeAsync(string dbPath, string symbolName, string columnName, CancellationToken ct = default)

@@ -13,22 +13,47 @@ internal abstract class CollectorController<T> : ICollectorController
     protected abstract bool IsEnable { get; }
     protected abstract bool IsFutures { get; }
     private readonly StorageController<T> storageController;
+    private List<T>? preparedSymbols;
 
     public CollectorController(ILogger logger, ProductionLine productionLine, StorageController<T> storageController)
         => (this.logger, this.productionLine, this.storageController) = (logger, productionLine, storageController);
 
-    public async Task GatherAsync(CancellationToken ct = default)
+    public async Task<bool> PrepareAsync(CancellationToken ct = default)
     {
         if (!IsEnable)
-            return;
-        Result<List<T>> result = await storageController.UpdateMocketAsync(ct);
+        {
+            preparedSymbols = null;
+            return true;
+        }
+        Result<List<T>> result = await storageController.FetchMarketAsync(ct);
         if (result.IsFailed)
         {
             logger.LogError(result.Errors[0].Message);
+            preparedSymbols = null;
+            return false;
+        }
+
+        preparedSymbols = result.Value;
+        return true;
+    }
+
+    public async Task DispatchAsync(CancellationToken ct = default)
+    {
+        if (!IsEnable)
+            return;
+
+        if (preparedSymbols is null)
+            throw new InvalidOperationException($"{GetType().Name} was not prepared before dispatch.");
+
+        Result applyResult = await storageController.ApplyMarketAsync(preparedSymbols, ct);
+        if (applyResult.IsFailed)
+        {
+            logger.LogError(applyResult.Errors[0].Message);
+            preparedSymbols = null;
             return;
         }
 
-        foreach (T symbol in result.Value)
+        foreach (T symbol in preparedSymbols)
         {
             AsyncWorkItem<T> workItem = new(GetLastTimeAsync, symbol, ct, $"Step=GetLastTime, Symbol={symbol}");
             if (await productionLine.GetLastTimeChannel.Writer.WaitToWriteAsync(ct))
@@ -36,6 +61,7 @@ internal abstract class CollectorController<T> : ICollectorController
         }
 
         await productionLine.DeleteChannel.Writer.WriteAsync(DeleteOldData(ct), ct);
+        preparedSymbols = null;
     }
 
     private async Task GetLastTimeAsync(T symbol, CancellationToken ct = default)

@@ -82,8 +82,19 @@ public class HangfireJob
             ProductionLine productionLine = scopeServiceProvider.GetService<ProductionLine>()!;
             productionLine.ResetEvent();
             ICollectorController[] controllers = scopeServiceProvider.GetServices<ICollectorController>().ToArray();
+
+            bool allPrepared = true;
             foreach (ICollectorController controller in controllers)
-                await controller.GatherAsync(ct);
+                allPrepared &= await controller.PrepareAsync(ct);
+
+            if (!allPrepared)
+            {
+                logger.LogWarning("One or more markets failed during prepare phase. Dispatch skipped at: {time}", DateTimeOffset.Now);
+                return;
+            }
+
+            foreach (ICollectorController controller in controllers)
+                await controller.DispatchAsync(ct);
             logger.LogInformation("Waiting for production line to finish at: {time}", DateTimeOffset.Now);
             bool productionLineCompleted = productionLine.Wait(ct);
             if (!productionLineCompleted)

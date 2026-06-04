@@ -61,7 +61,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
-        => GetLastTimestampAsync(KlinePath, symbol.Name, nameof(Kline.CloseTime), null, ct);
+        => GetLastTimestampAsync(KlinePath, symbol.Name, nameof(Kline.CloseTime), nameof(Kline), interval, null, ct);
 
     public override Task<DateTime> GetLastPremiumIndexTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
         => throw new NotSupportedException("Spot market does not support premium index klines.");

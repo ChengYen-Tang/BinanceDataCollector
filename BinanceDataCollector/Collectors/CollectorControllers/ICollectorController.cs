@@ -2,5 +2,6 @@
 
 internal interface ICollectorController
 {
-    Task GatherAsync(CancellationToken ct = default);
+    Task<bool> PrepareAsync(CancellationToken ct = default);
+    Task DispatchAsync(CancellationToken ct = default);
 }

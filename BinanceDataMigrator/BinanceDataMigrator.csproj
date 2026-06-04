@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Binance.Net" Version="12.12.0" />
+    <PackageReference Include="Binance.Net" Version="12.13.0" />
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />

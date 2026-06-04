@@ -81,16 +81,16 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
-        => GetLastTimestampAsync(KlinePath, symbol.Name, nameof(Kline.CloseTime), null, ct);
+        => GetLastTimestampAsync(KlinePath, symbol.Name, nameof(Kline.CloseTime), nameof(Kline), interval, null, ct);
 
     public override Task<DateTime> GetLastPremiumIndexTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
-        => GetLastTimestampAsync(PremiumIndexKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
+        => GetLastTimestampAsync(PremiumIndexKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), nameof(PremiumIndexKline), interval, null, ct);
 
     public override Task<DateTime> GetLastIndexPriceTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
-        => GetLastTimestampAsync(IndexPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
+        => GetLastTimestampAsync(IndexPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), "IndexPriceKline", interval, null, ct);
 
     public override Task<DateTime> GetLastMarkPriceTimeAsync(SymbolInfoCsv symbol, KlineInterval interval, CancellationToken ct = default)
-        => GetLastTimestampAsync(MarkPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), null, ct);
+        => GetLastTimestampAsync(MarkPriceKlinePath, symbol.Name, nameof(PremiumIndexKline.CloseTime), "MarkPriceKline", interval, null, ct);
 
     protected override async Task<Result<IReadOnlyList<Kline>>> GetKlinesAsync(SymbolInfoCsv symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
@@ -202,7 +202,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastFundingTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(FundingRatePath, symbol.Name, nameof(FundingRate.FundingTime), null, ct);
+        => GetLastTimestampAsync(FundingRatePath, symbol.Name, nameof(FundingRate.FundingTime), nameof(FundingRate), null, null, ct);
 
     protected override async Task<Result<IReadOnlyList<FundingRate>>> GetFundingRatesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
@@ -220,10 +220,10 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastOpenInterestTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(OpenInterestPath, symbol.Name, nameof(OpenInterestHistory.Timestamp), null, ct);
+        => GetLastTimestampAsync(OpenInterestPath, symbol.Name, nameof(OpenInterestHistory.Timestamp), nameof(OpenInterestHistory), null, null, ct);
 
     public override Task<DateTime> GetLastBasisTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(BasisPath, symbol.Name, nameof(FuturesBasisCsv.Timestamp), null, ct);
+        => GetLastTimestampAsync(BasisPath, symbol.Name, nameof(FuturesBasisCsv.Timestamp), nameof(FuturesBasisCsv), null, null, ct);
 
     protected override async Task<Result<IReadOnlyList<OpenInterestHistory>>> GetOpenInterestHistoriesAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
@@ -245,7 +245,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastTopLongShortPositionRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(TopLongShortPositionRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), null, ct);
+        => GetLastTimestampAsync(TopLongShortPositionRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), "TopLongShortPositionRatios", null, null, ct);
 
     protected override async Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetTopLongShortPositionRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
@@ -264,7 +264,7 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastTopLongShortAccountRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(TopLongShortAccountRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), null, ct);
+        => GetLastTimestampAsync(TopLongShortAccountRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), "TopLongShortAccountRatios", null, null, ct);
 
     protected override async Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetTopLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
@@ -283,10 +283,10 @@ internal class UsdFuturesStorageController : StorageController<SymbolInfoCsv>
     }
 
     public override Task<DateTime> GetLastGlobalLongShortAccountRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(GlobalLongShortAccountRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), null, ct);
+        => GetLastTimestampAsync(GlobalLongShortAccountRatioPath, symbol.Name, nameof(LongShortRatioCsv.Timestamp), "GlobalLongShortAccountRatios", null, null, ct);
 
     public override Task<DateTime> GetLastTakerLongShortRatioTimeAsync(SymbolInfoCsv symbol, CancellationToken ct = default)
-        => GetLastTimestampAsync(TakerLongShortRatioPath, symbol.Name, nameof(TakerLongShortRatioCsv.Timestamp), null, ct);
+        => GetLastTimestampAsync(TakerLongShortRatioPath, symbol.Name, nameof(TakerLongShortRatioCsv.Timestamp), nameof(TakerLongShortRatioCsv), null, null, ct);
 
     protected override async Task<Result<IReadOnlyList<LongShortRatioCsv>>> GetGlobalLongShortAccountRatiosAsync(SymbolInfoCsv symbol, DateTime startTime, CancellationToken ct = default)
     {
