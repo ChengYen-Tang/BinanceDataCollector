@@ -55,13 +55,13 @@ internal class ProductionLine
         isRunning = true;
     }
 
-    public async Task StopAsync(CancellationToken ct = default)
+    public void Stop()
     {
         if (!isRunning)
             return;
         stopWaitEvent.Set();
         cancellationTokenSource.Cancel();
-        await Task.WhenAll(tasks).WaitAsync(ct);
+        Task.WaitAll([.. tasks]);
         cancellationTokenSource.Dispose();
         tasks.Clear();
         isRunning = false;

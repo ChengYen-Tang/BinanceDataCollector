@@ -33,12 +33,12 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        backgroundJobServer.Dispose();
         hangfireJob.RequestStop();
         cts.Cancel();
-        await productionLine.StopAsync(CancellationToken.None);
+        productionLine.Stop();
         await hangfireJob.WaitForIdleAsync(CancellationToken.None);
-        await DuckDbStorageHelper.CheckpointStorageAsync(DuckDbStorageArchiveHelper.StorageRootPath, CancellationToken.None);
+        backgroundJobServer.Dispose();
+        await DuckDbStorageHelper.CheckpointStorageAsync(DuckDbStorageArchiveHelper.StorageRootPath, cancellationToken);
         logger.LogInformation("Worker stopped at: {time}", DateTimeOffset.Now);
     }
 }
