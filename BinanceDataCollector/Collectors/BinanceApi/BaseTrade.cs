@@ -35,7 +35,7 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
     internal static DateTime GetNextRestrictedStartTime(DateTime lastTimestamp)
         => lastTimestamp.Subtract(RestrictedApiOverlap);
 
-    private static TimeSpan GetKlineIntervalSpan(KlineInterval interval)
+    protected static TimeSpan GetKlineIntervalSpan(KlineInterval interval)
         => interval switch
         {
             KlineInterval.OneSecond => TimeSpan.FromSeconds(1),

@@ -16,7 +16,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<ApiKline[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
             }
             catch (Exception ex)
             {
@@ -39,7 +39,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceMarkIndexKline[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetIndexPriceKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetIndexPriceKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
             }
             catch (Exception ex)
             {
@@ -62,7 +62,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceMarkIndexKline[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetMarkPriceKlinesAsync(symbol, interval, 1500, startTime, endTime, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetMarkPriceKlinesAsync(symbol, interval, 1500, startTime, endTime.Add(GetKlineIntervalSpan(interval)), ct);
             }
             catch (Exception ex)
             {
@@ -85,7 +85,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceMarkIndexKline[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
             }
             catch (Exception ex)
             {
@@ -124,7 +124,7 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
             WebCallResult<BinanceFuturesFundingRateHistory[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetFundingRatesAsync(symbol, startTime, endTime, 499, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetFundingRatesAsync(symbol, startTime, endTime.AddHours(8), 499, ct);
             }
             catch (Exception ex)
             {

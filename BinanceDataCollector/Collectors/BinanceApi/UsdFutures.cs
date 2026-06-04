@@ -16,7 +16,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             WebCallResult<ApiKline[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
             }
             catch (Exception ex)
             {
@@ -39,7 +39,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             WebCallResult<ApiKline[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetIndexPriceKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetIndexPriceKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
             }
             catch (Exception ex)
             {
@@ -70,7 +70,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             WebCallResult<BinanceMarkIndexKline[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetMarkPriceKlinesAsync(symbol, interval, 1500, startTime, endTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetMarkPriceKlinesAsync(symbol, interval, 1500, startTime, endTime.Add(GetKlineIntervalSpan(interval)), ct);
             }
             catch (Exception ex)
             {
@@ -93,7 +93,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             WebCallResult<BinanceMarkIndexKline[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
             }
             catch (Exception ex)
             {
@@ -132,7 +132,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             WebCallResult<BinanceFuturesFundingRateHistory[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetFundingRatesAsync(symbol, startTime, endTime, 499, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetFundingRatesAsync(symbol, startTime, endTime.AddHours(8), 499, ct);
             }
             catch (Exception ex)
             {

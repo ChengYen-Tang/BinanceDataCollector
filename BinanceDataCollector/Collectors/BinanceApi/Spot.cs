@@ -15,7 +15,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                 WebCallResult<ApiKline[]> result;
                 try
                 {
-                    result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime, 1500, ct);
+                    result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
                 }
                 catch (Exception ex)
                 {
