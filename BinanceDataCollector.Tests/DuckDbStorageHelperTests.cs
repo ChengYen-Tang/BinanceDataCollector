@@ -453,6 +453,36 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
+    public async Task EnsureDatabaseCreatedAsync_WhenDatabaseDoesNotExist_CreatesFile()
+    {
+        string dbPath = Path.Combine(tempDirectory, "bootstrap", "storage.duckdb");
+
+        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(
+            dbPath,
+            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+
+        Assert.IsTrue(File.Exists(dbPath));
+    }
+
+    [TestMethod]
+    public async Task EnsureDatabaseCreatedAsync_WhenUsingLargeRowGroupProfile_AllowsSubsequentDirectOpenWrites()
+    {
+        string dbPath = Path.Combine(tempDirectory, "bootstrap-write", "storage.duckdb");
+
+        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(
+            dbPath,
+            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+
+        await DuckDbStorageHelper.ReplaceTableAsync(
+            dbPath,
+            "Rows",
+            [new QueryLongRecord { Id = "1", Sequence = 123L }]);
+
+        long? max = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", nameof(QueryLongRecord.Sequence));
+        Assert.AreEqual(123L, max);
+    }
+
+    [TestMethod]
     public async Task GetMaxDateTimeAsync_WhenFilteredByNullValue_ReturnsMatchingRow()
     {
         string dbPath = CreateDbPath();
@@ -1060,36 +1090,6 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
-    public async Task AppendAggTradesFromCsvAsync_WhenDatabasePathUsesAggTradesFolder_ImportsAllRows()
-    {
-        string dbPath = CreateMarketDataDbPath("aggTrades");
-        string csvPath = Path.Combine(tempDirectory, "aggTrades-folder.csv");
-
-        WriteAggTradesCsv(csvPath, totalRows: 3, AggTradesCsvSchema.Futures, includeHeader: true);
-
-        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
-            dbPath,
-            "BTCUSDT",
-            csvPath,
-            AggTradesCsvSchema.Futures,
-            sourceIsMicroseconds: false);
-
-        await using DuckDBConnection connection = new($"Data Source={dbPath}");
-        await connection.OpenAsync();
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT COUNT(*), MIN(transact_time), MAX(transact_time)
-            FROM BTCUSDT;
-            """;
-        await using var reader = await command.ExecuteReaderAsync();
-
-        Assert.IsTrue(await reader.ReadAsync());
-        Assert.AreEqual(3L, reader.GetInt64(0));
-        Assert.AreEqual(1_000_000L, reader.GetInt64(1));
-        Assert.AreEqual(3_000_000L, reader.GetInt64(2));
-    }
-
-    [TestMethod]
     public async Task ReplaceBookDepthTailFromCsvAsync_WhenFinalBatchIsPartial_DoesNotPersistStaleRows()
     {
         string dbPath = CreateDbPath();
@@ -1140,36 +1140,8 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
     }
 
-    [TestMethod]
-    public async Task ReplaceBookDepthTailFromCsvAsync_WhenDatabasePathUsesBookDepthFolder_ImportsAllRows()
-    {
-        string dbPath = CreateMarketDataDbPath("bookDepth");
-        string csvPath = Path.Combine(tempDirectory, "bookDepth-folder.csv");
-
-        WriteBookDepthCsv(csvPath, totalRows: 3);
-
-        await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(dbPath, "BTCUSDT", csvPath);
-
-        await using DuckDBConnection connection = new($"Data Source={dbPath}");
-        await connection.OpenAsync();
-        using DuckDBCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT COUNT(*), MIN(snapshot_time), MAX(snapshot_time)
-            FROM BTCUSDT;
-            """;
-        await using var reader = await command.ExecuteReaderAsync();
-
-        Assert.IsTrue(await reader.ReadAsync());
-        Assert.AreEqual(3L, reader.GetInt64(0));
-        Assert.AreEqual(1_735_689_600_000L, reader.GetInt64(1));
-        Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
-    }
-
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
-
-    private string CreateMarketDataDbPath(string dataType)
-        => Path.Combine(tempDirectory, dataType, "storage.duckdb");
 
     private static Kline CreateKline(long openTime, long closeTime, double closePrice)
         => new()

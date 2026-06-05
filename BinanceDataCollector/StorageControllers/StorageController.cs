@@ -23,6 +23,10 @@ internal enum AggTradesTimeUnit
 internal abstract class StorageController<T>
     where T : class
 {
+    private readonly record struct DatabaseBootstrapPlan(
+        string DatabasePath,
+        DuckDbStorageHelper.DatabaseInitializationProfile Profile);
+
     private const long AggTradesMicrosecondsBoundary = 1_000_000_000_000_000L;
     private const int BinanceApiModelRowsInitialCapacity = 1_500;
     protected readonly IServiceProvider serviceProvider;
@@ -135,6 +139,8 @@ internal abstract class StorageController<T>
             upsertStopwatch.Stop();
             logger.LogInformation("Finish upserting {SymbolType}. Cost: {ElapsedMs}ms", typeof(T).Name, upsertStopwatch.ElapsedMilliseconds);
 
+            await EnsureConfiguredDatabasesCreatedAsync(ct);
+
             Stopwatch deleteStopwatch = Stopwatch.StartNew();
             await DeleteDelistedSymbolsAsync(currentSymbols, delistedSymbols, ct);
             deleteStopwatch.Stop();
@@ -146,6 +152,25 @@ internal abstract class StorageController<T>
             return Result.Fail(ex.Message);
         }
         return Result.Ok();
+    }
+
+    private async Task EnsureConfiguredDatabasesCreatedAsync(CancellationToken ct)
+    {
+        foreach (DatabaseBootstrapPlan plan in GetDatabaseBootstrapPlans())
+            await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(plan.DatabasePath, plan.Profile, ct);
+    }
+
+    private IReadOnlyList<DatabaseBootstrapPlan> GetDatabaseBootstrapPlans()
+    {
+        List<DatabaseBootstrapPlan> plans =
+        [
+            new(GetAggTradesDatabasePath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup)
+        ];
+
+        if (IsFutures)
+            plans.Add(new(GetBookDepthDatabasePath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup));
+
+        return plans;
     }
 
     public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)

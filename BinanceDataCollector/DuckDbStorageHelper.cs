@@ -1,4 +1,3 @@
-using BinanceDataCollector.Collectors.BinanceMarketData;
 using CollectorModels.Models.Storage;
 using DuckDB.NET.Data;
 using System.Collections.Concurrent;
@@ -12,10 +11,16 @@ namespace BinanceDataCollector;
 
 internal static class DuckDbStorageHelper
 {
+    internal enum DatabaseInitializationProfile
+    {
+        Default,
+        LargeRowGroup
+    }
+
     private const int MarketDataImportBatchSize = 10_0000;
-    private const int MarketDataRowGroupSize = 524_288;
-    private const string TunedCatalogName = "storage";
-    private const string TunedStorageVersion = "v1.2.0";
+    private const int LargeRowGroupSize = 524_288;
+    private const string BootstrapCatalogName = "bootstrap";
+    private const string LargeRowGroupStorageVersion = "v1.2.0";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -409,6 +414,27 @@ internal static class DuckDbStorageHelper
         });
     }
 
+    public static async Task EnsureDatabaseCreatedAsync(
+        string dbPath,
+        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
+        CancellationToken ct = default)
+    {
+        await WithTableLockAsync(dbPath, string.Empty, async normalizedPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string? directoryPath = Path.GetDirectoryName(normalizedPath);
+            if (!string.IsNullOrWhiteSpace(directoryPath))
+                Directory.CreateDirectory(directoryPath);
+
+            if (File.Exists(normalizedPath))
+                return;
+
+            using DuckDBConnection connection = OpenConnectionForInitialization(normalizedPath, profile);
+            await Task.CompletedTask;
+        }, ct);
+    }
+
     public static void CloseAllConnections()
         => ExecuteExclusiveAsync(static () => Task.CompletedTask).GetAwaiter().GetResult();
 
@@ -453,15 +479,22 @@ internal static class DuckDbStorageHelper
         if (!string.IsNullOrWhiteSpace(directoryPath))
             Directory.CreateDirectory(directoryPath);
 
-        if (RequiresLargeMarketDataRowGroups(normalizedPath))
-            return OpenAttachedConnection(normalizedPath, MarketDataRowGroupSize);
-
         DuckDBConnection connection = new($"Data Source={normalizedPath}");
         connection.Open();
         return connection;
     }
 
-    private static DuckDBConnection OpenAttachedConnection(string normalizedPath, int rowGroupSize)
+    private static DuckDBConnection OpenConnectionForInitialization(string normalizedPath, DatabaseInitializationProfile profile)
+    {
+        return profile switch
+        {
+            DatabaseInitializationProfile.Default => OpenConnection(normalizedPath),
+            DatabaseInitializationProfile.LargeRowGroup => OpenConnectionWithLargeRowGroupBootstrap(normalizedPath),
+            _ => throw new ArgumentOutOfRangeException(nameof(profile), profile, "Unsupported database initialization profile.")
+        };
+    }
+
+    private static DuckDBConnection OpenConnectionWithLargeRowGroupBootstrap(string normalizedPath)
     {
         DuckDBConnection connection = new("Data Source=:memory:");
         try
@@ -469,8 +502,11 @@ internal static class DuckDbStorageHelper
             connection.Open();
             string escapedPath = normalizedPath.Replace("'", "''", StringComparison.Ordinal);
             ExecuteDuckDbNonQuery(connection, $"""
-                ATTACH '{escapedPath}' AS {QuoteIdentifier(TunedCatalogName)} (ROW_GROUP_SIZE {rowGroupSize}, STORAGE_VERSION '{TunedStorageVersion}');
-                USE {QuoteIdentifier(TunedCatalogName)};
+                ATTACH '{escapedPath}' AS {QuoteIdentifier(BootstrapCatalogName)} (ROW_GROUP_SIZE {LargeRowGroupSize}, STORAGE_VERSION '{LargeRowGroupStorageVersion}');
+                USE {QuoteIdentifier(BootstrapCatalogName)};
+                CREATE TABLE IF NOT EXISTS __bootstrap__row_group__init(id INTEGER);
+                DROP TABLE __bootstrap__row_group__init;
+                CHECKPOINT;
                 """);
             return connection;
         }
@@ -479,16 +515,6 @@ internal static class DuckDbStorageHelper
             connection.Dispose();
             throw;
         }
-    }
-
-    private static bool RequiresLargeMarketDataRowGroups(string normalizedPath)
-    {
-        string? parentDirectoryName = Path.GetFileName(Path.GetDirectoryName(normalizedPath));
-        if (string.IsNullOrWhiteSpace(parentDirectoryName))
-            return false;
-
-        return string.Equals(parentDirectoryName, BaseMarketData.AggTradesDataType, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(parentDirectoryName, BaseMarketData.BookDepthDataType, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void BeginExclusiveMode()
