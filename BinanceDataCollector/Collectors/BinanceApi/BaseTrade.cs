@@ -8,7 +8,7 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
     private static readonly TimeSpan MaxRestrictedApiLookback = TimeSpan.FromDays(29);
     private static readonly TimeSpan RestrictedApiPageWindow = TimeSpan.FromMinutes(499 * 5);
     private static readonly TimeSpan RestrictedApiEndTimePadding = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan RestrictedApiOverlap = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RestrictedApiInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan FundingRateOverlap = TimeSpan.FromHours(8);
 
     protected readonly IBinanceRestClient client = client;
@@ -26,14 +26,21 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
         return requestEndTime < effectiveOverallEndTime ? requestEndTime : effectiveOverallEndTime;
     }
 
+    protected static DateTime GetRestrictedRequestStartTime(DateTime currentStartTime)
+        => ClampRestrictedStartTime(currentStartTime.Subtract(RestrictedApiInterval));
+
     internal static DateTime GetNextKlineStartTime(DateTime lastCloseTime, KlineInterval interval)
         => lastCloseTime.Subtract(GetKlineIntervalSpan(interval));
 
     internal static DateTime GetNextFundingRateStartTime(DateTime lastFundingTime)
         => lastFundingTime.Subtract(FundingRateOverlap);
 
-    internal static DateTime GetNextRestrictedStartTime(DateTime lastTimestamp)
-        => lastTimestamp.Subtract(RestrictedApiOverlap);
+    internal static DateTime GetNextRestrictedStartTime(DateTime currentStartTime, DateTime lastTimestamp)
+    {
+        DateTime nextTimestampStartTime = lastTimestamp.Add(RestrictedApiInterval);
+        DateTime nextProgressStartTime = currentStartTime.Add(RestrictedApiInterval);
+        return nextTimestampStartTime > nextProgressStartTime ? nextTimestampStartTime : nextProgressStartTime;
+    }
 
     protected static TimeSpan GetKlineIntervalSpan(KlineInterval interval)
         => interval switch

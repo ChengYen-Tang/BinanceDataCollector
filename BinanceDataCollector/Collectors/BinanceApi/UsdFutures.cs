@@ -148,16 +148,17 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesOpenInterestHistory>>> GetOpenInterestHistoryAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        startTime = ClampRestrictedStartTime(startTime);
+        DateTime cursor = ClampRestrictedStartTime(startTime);
         DateTime overallEndTime = DateTime.Today;
         List<BinanceFuturesOpenInterestHistory> openInterestHistories = [];
-        while (startTime < overallEndTime)
+        while (cursor < overallEndTime)
         {
-            DateTime requestEndTime = GetRestrictedEndTime(startTime, overallEndTime);
+            DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
+            DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
             WebCallResult<BinanceFuturesOpenInterestHistory[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(symbol, PeriodInterval.FiveMinutes, 499, startTime, requestEndTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
             }
             catch (Exception ex)
             {
@@ -165,8 +166,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            BinanceFuturesOpenInterestHistory[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
+            BinanceFuturesOpenInterestHistory[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
+            cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             openInterestHistories.AddRange(validData);
         }
 
@@ -175,16 +176,17 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesBasis>>> GetBasisAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        startTime = ClampRestrictedStartTime(startTime);
+        DateTime cursor = ClampRestrictedStartTime(startTime);
         DateTime overallEndTime = DateTime.Today;
         List<BinanceFuturesBasis> basis = [];
-        while (startTime < overallEndTime)
+        while (cursor < overallEndTime)
         {
-            DateTime requestEndTime = GetRestrictedEndTime(startTime, overallEndTime);
+            DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
+            DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
             WebCallResult<BinanceFuturesBasis[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetBasisAsync(symbol, ContractType.Perpetual, PeriodInterval.FiveMinutes, 499, startTime, requestEndTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetBasisAsync(symbol, ContractType.Perpetual, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
             }
             catch (Exception ex)
             {
@@ -192,8 +194,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            BinanceFuturesBasis[] validData = [.. result.Data.Where(item => item.Timestamp != default)];
-            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp) : startTime.AddDays(200);
+            BinanceFuturesBasis[] validData = [.. result.Data.Where(item => item.Timestamp != default && item.Timestamp >= cursor)];
+            cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp) : cursor.AddDays(200);
             basis.AddRange(validData);
         }
 
@@ -202,16 +204,17 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesLongShortRatio>>> GetTopLongShortPositionRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        startTime = ClampRestrictedStartTime(startTime);
+        DateTime cursor = ClampRestrictedStartTime(startTime);
         DateTime overallEndTime = DateTime.Today;
         List<BinanceFuturesLongShortRatio> ratios = [];
-        while (startTime < overallEndTime)
+        while (cursor < overallEndTime)
         {
-            DateTime requestEndTime = GetRestrictedEndTime(startTime, overallEndTime);
+            DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
+            DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
             WebCallResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetTopLongShortPositionRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, startTime, requestEndTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetTopLongShortPositionRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
             }
             catch (Exception ex)
             {
@@ -219,8 +222,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
+            BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
+            cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -228,16 +231,17 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesLongShortRatio>>> GetTopLongShortAccountRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        startTime = ClampRestrictedStartTime(startTime);
+        DateTime cursor = ClampRestrictedStartTime(startTime);
         DateTime overallEndTime = DateTime.Today;
         List<BinanceFuturesLongShortRatio> ratios = [];
-        while (startTime < overallEndTime)
+        while (cursor < overallEndTime)
         {
-            DateTime requestEndTime = GetRestrictedEndTime(startTime, overallEndTime);
+            DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
+            DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
             WebCallResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetTopLongShortAccountRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, startTime, requestEndTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetTopLongShortAccountRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
             }
             catch (Exception ex)
             {
@@ -245,8 +249,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
+            BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
+            cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -254,16 +258,17 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesLongShortRatio>>> GetGlobalLongShortAccountRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        startTime = ClampRestrictedStartTime(startTime);
+        DateTime cursor = ClampRestrictedStartTime(startTime);
         DateTime overallEndTime = DateTime.Today;
         List<BinanceFuturesLongShortRatio> ratios = [];
-        while (startTime < overallEndTime)
+        while (cursor < overallEndTime)
         {
-            DateTime requestEndTime = GetRestrictedEndTime(startTime, overallEndTime);
+            DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
+            DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
             WebCallResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetGlobalLongShortAccountRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, startTime, requestEndTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetGlobalLongShortAccountRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
             }
             catch (Exception ex)
             {
@@ -271,8 +276,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
+            BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
+            cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
@@ -280,16 +285,17 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
 
     public async Task<Result<List<BinanceFuturesBuySellVolumeRatio>>> GetTakerLongShortRatioAsync(string symbol, DateTime startTime, CancellationToken ct = default)
     {
-        startTime = ClampRestrictedStartTime(startTime);
+        DateTime cursor = ClampRestrictedStartTime(startTime);
         DateTime overallEndTime = DateTime.Today;
         List<BinanceFuturesBuySellVolumeRatio> ratios = [];
-        while (startTime < overallEndTime)
+        while (cursor < overallEndTime)
         {
-            DateTime requestEndTime = GetRestrictedEndTime(startTime, overallEndTime);
+            DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
+            DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
             WebCallResult<BinanceFuturesBuySellVolumeRatio[]> result;
             try
             {
-                result = await base.client.UsdFuturesApi.ExchangeData.GetTakerBuySellVolumeRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, startTime, requestEndTime, ct);
+                result = await base.client.UsdFuturesApi.ExchangeData.GetTakerBuySellVolumeRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
             }
             catch (Exception ex)
             {
@@ -297,8 +303,8 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
             }
             if (!result.Success)
                 return Result.Fail(result.Error!.Message);
-            BinanceFuturesBuySellVolumeRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue)];
-            startTime = validData.Length != 0 ? GetNextRestrictedStartTime(validData.Last().Timestamp!.Value) : startTime.AddDays(200);
+            BinanceFuturesBuySellVolumeRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
+            cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
         }
         return Result.Ok(ratios);
