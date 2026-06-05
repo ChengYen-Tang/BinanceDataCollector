@@ -8,14 +8,17 @@ namespace BinanceDataCollector.Collectors.BinanceApi
     {
         public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         {
-            DateTime endTime = DateTime.Today;
+            TimeSpan intervalSpan = GetKlineIntervalSpan(interval);
+            DateTime cursor = startTime;
+            DateTime overallEndTime = DateTime.Today;
             List<ApiKline> klines = [];
-            while (startTime < endTime)
+            while (cursor < overallEndTime)
             {
+                DateTime requestStartTime = GetRequestStartTime(cursor, intervalSpan);
                 WebCallResult<ApiKline[]> result;
                 try
                 {
-                    result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, startTime, endTime.Add(GetKlineIntervalSpan(interval)), 1500, ct);
+                    result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, requestStartTime, overallEndTime.Add(intervalSpan), 1500, ct);
                 }
                 catch (Exception ex)
                 {
@@ -23,10 +26,9 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                 }
                 if (!result.Success)
                     return Result.Fail(result.Error!.Message);
-                if (result.Data!.Length == 0)
-                    break;
-                startTime = GetNextKlineStartTime(result.Data.Last().CloseTime, interval);
-                klines.AddRange(result.Data);
+                ApiKline[] validData = [.. result.Data!.Where(item => item.CloseTime >= cursor)];
+                cursor = validData.Length != 0 ? GetNextKlineStartTime(cursor, validData.Last().CloseTime, interval) : cursor.AddDays(200);
+                klines.AddRange(validData);
             }
             return Result.Ok(klines);
         }

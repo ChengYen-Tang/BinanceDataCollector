@@ -9,7 +9,7 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
     private static readonly TimeSpan RestrictedApiPageWindow = TimeSpan.FromMinutes(499 * 5);
     private static readonly TimeSpan RestrictedApiEndTimePadding = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan RestrictedApiInterval = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan FundingRateOverlap = TimeSpan.FromHours(8);
+    private static readonly TimeSpan FundingRateInterval = TimeSpan.FromHours(8);
 
     protected readonly IBinanceRestClient client = client;
 
@@ -29,16 +29,22 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
     protected static DateTime GetRestrictedRequestStartTime(DateTime currentStartTime)
         => ClampRestrictedStartTime(currentStartTime.Subtract(RestrictedApiInterval));
 
-    internal static DateTime GetNextKlineStartTime(DateTime lastCloseTime, KlineInterval interval)
-        => lastCloseTime.Subtract(GetKlineIntervalSpan(interval));
+    protected static DateTime GetRequestStartTime(DateTime currentStartTime, TimeSpan interval)
+        => currentStartTime.Subtract(interval);
 
-    internal static DateTime GetNextFundingRateStartTime(DateTime lastFundingTime)
-        => lastFundingTime.Subtract(FundingRateOverlap);
+    internal static DateTime GetNextKlineStartTime(DateTime currentStartTime, DateTime lastCloseTime, KlineInterval interval)
+        => GetNextRestrictedStartTime(currentStartTime, lastCloseTime, GetKlineIntervalSpan(interval));
+
+    internal static DateTime GetNextFundingRateStartTime(DateTime currentStartTime, DateTime lastFundingTime)
+        => GetNextRestrictedStartTime(currentStartTime, lastFundingTime, FundingRateInterval);
 
     internal static DateTime GetNextRestrictedStartTime(DateTime currentStartTime, DateTime lastTimestamp)
+        => GetNextRestrictedStartTime(currentStartTime, lastTimestamp, RestrictedApiInterval);
+
+    internal static DateTime GetNextRestrictedStartTime(DateTime currentStartTime, DateTime lastTimestamp, TimeSpan interval)
     {
-        DateTime nextTimestampStartTime = lastTimestamp.Add(RestrictedApiInterval);
-        DateTime nextProgressStartTime = currentStartTime.Add(RestrictedApiInterval);
+        DateTime nextTimestampStartTime = lastTimestamp.Add(interval);
+        DateTime nextProgressStartTime = currentStartTime.Add(interval);
         return nextTimestampStartTime > nextProgressStartTime ? nextTimestampStartTime : nextProgressStartTime;
     }
 
