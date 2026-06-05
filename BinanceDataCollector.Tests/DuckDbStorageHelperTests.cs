@@ -973,9 +973,14 @@ public sealed class DuckDbStorageHelperTests
         string csvPath = Path.Combine(tempDirectory, "aggTrades.csv");
         const int totalRows = 100_001;
 
-        WriteAggTradesCsv(csvPath, totalRows);
+        WriteAggTradesCsv(csvPath, totalRows, AggTradesCsvSchema.Futures);
 
-        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(dbPath, "BTCUSDT", csvPath, sourceIsMicroseconds: false);
+        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
+            dbPath,
+            "BTCUSDT",
+            csvPath,
+            AggTradesCsvSchema.Futures,
+            sourceIsMicroseconds: false);
 
         await using DuckDBConnection connection = new($"Data Source={dbPath}");
         await connection.OpenAsync();
@@ -999,9 +1004,14 @@ public sealed class DuckDbStorageHelperTests
         string dbPath = CreateDbPath();
         string csvPath = Path.Combine(tempDirectory, "aggTrades-with-header.csv");
 
-        WriteAggTradesCsv(csvPath, totalRows: 3, includeHeader: true);
+        WriteAggTradesCsv(csvPath, totalRows: 3, AggTradesCsvSchema.Futures, includeHeader: true);
 
-        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(dbPath, "BTCUSDT", csvPath, sourceIsMicroseconds: false);
+        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
+            dbPath,
+            "BTCUSDT",
+            csvPath,
+            AggTradesCsvSchema.Futures,
+            sourceIsMicroseconds: false);
 
         await using DuckDBConnection connection = new($"Data Source={dbPath}");
         await connection.OpenAsync();
@@ -1016,6 +1026,67 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual(3L, reader.GetInt64(0));
         Assert.AreEqual(1L, reader.GetInt64(1));
         Assert.AreEqual(3L, reader.GetInt64(2));
+    }
+
+    [TestMethod]
+    public async Task AppendAggTradesFromCsvAsync_WhenSpotCsvHasEightColumns_ImportsAllRows()
+    {
+        string dbPath = CreateDbPath();
+        string csvPath = Path.Combine(tempDirectory, "spot-aggTrades-no-header.csv");
+
+        WriteAggTradesCsv(csvPath, totalRows: 3, AggTradesCsvSchema.Spot, includeHeader: false);
+
+        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
+            dbPath,
+            "BTCUSDT",
+            csvPath,
+            AggTradesCsvSchema.Spot,
+            sourceIsMicroseconds: true);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(parquetagg_trade_id), MAX(parquetagg_trade_id), MAX(transact_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(3L, reader.GetInt64(0));
+        Assert.AreEqual(1L, reader.GetInt64(1));
+        Assert.AreEqual(3L, reader.GetInt64(2));
+        Assert.AreEqual(3_000L, reader.GetInt64(3));
+    }
+
+    [TestMethod]
+    public async Task AppendAggTradesFromCsvAsync_WhenDatabasePathUsesAggTradesFolder_ImportsAllRows()
+    {
+        string dbPath = CreateMarketDataDbPath("aggTrades");
+        string csvPath = Path.Combine(tempDirectory, "aggTrades-folder.csv");
+
+        WriteAggTradesCsv(csvPath, totalRows: 3, AggTradesCsvSchema.Futures, includeHeader: true);
+
+        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
+            dbPath,
+            "BTCUSDT",
+            csvPath,
+            AggTradesCsvSchema.Futures,
+            sourceIsMicroseconds: false);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(transact_time), MAX(transact_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(3L, reader.GetInt64(0));
+        Assert.AreEqual(1_000_000L, reader.GetInt64(1));
+        Assert.AreEqual(3_000_000L, reader.GetInt64(2));
     }
 
     [TestMethod]
@@ -1069,8 +1140,36 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
     }
 
+    [TestMethod]
+    public async Task ReplaceBookDepthTailFromCsvAsync_WhenDatabasePathUsesBookDepthFolder_ImportsAllRows()
+    {
+        string dbPath = CreateMarketDataDbPath("bookDepth");
+        string csvPath = Path.Combine(tempDirectory, "bookDepth-folder.csv");
+
+        WriteBookDepthCsv(csvPath, totalRows: 3);
+
+        await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(dbPath, "BTCUSDT", csvPath);
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(snapshot_time), MAX(snapshot_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(3L, reader.GetInt64(0));
+        Assert.AreEqual(1_735_689_600_000L, reader.GetInt64(1));
+        Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
+    }
+
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
+
+    private string CreateMarketDataDbPath(string dataType)
+        => Path.Combine(tempDirectory, dataType, "storage.duckdb");
 
     private static Kline CreateKline(long openTime, long closeTime, double closePrice)
         => new()
@@ -1108,11 +1207,20 @@ public sealed class DuckDbStorageHelperTests
             })
             .ToArray();
 
-    private static void WriteAggTradesCsv(string csvPath, int totalRows, bool includeHeader = false)
+    private static void WriteAggTradesCsv(
+        string csvPath,
+        int totalRows,
+        AggTradesCsvSchema schema,
+        bool includeHeader = false)
     {
         using StreamWriter writer = new(csvPath);
         if (includeHeader)
-            writer.WriteLine("agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker");
+        {
+            writer.Write("agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker");
+            if (schema == AggTradesCsvSchema.Spot)
+                writer.Write(",is_best_match");
+            writer.WriteLine();
+        }
 
         for (int index = 1; index <= totalRows; index++)
         {
@@ -1129,6 +1237,11 @@ public sealed class DuckDbStorageHelperTests
             writer.Write((index * 1_000L).ToString(System.Globalization.CultureInfo.InvariantCulture));
             writer.Write(',');
             writer.Write(index % 2 == 0 ? "true" : "false");
+            if (schema == AggTradesCsvSchema.Spot)
+            {
+                writer.Write(',');
+                writer.Write(index % 2 != 0 ? "true" : "false");
+            }
             writer.WriteLine();
         }
     }

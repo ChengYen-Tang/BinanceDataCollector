@@ -444,7 +444,7 @@ internal abstract class StorageController<T>
         finally
         {
             if (uniqueRows is not null)
-            batch.Dispose();
+                batch.Dispose();
         }
     }
 
@@ -516,6 +516,7 @@ internal abstract class StorageController<T>
                         databasePath,
                         batch.Symbol,
                         csvPath,
+                        GetAggTradesCsvSchema(),
                         GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
                         ct);
                 }
@@ -597,6 +598,9 @@ internal abstract class StorageController<T>
         logger.LogDebug("Finish persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
     }
+
+    private AggTradesCsvSchema GetAggTradesCsvSchema()
+        => IsFutures ? AggTradesCsvSchema.Futures : AggTradesCsvSchema.Spot;
 
     public virtual async Task<DateTime> GetLastAggTradesAsync(T symbol, CancellationToken ct = default)
     {
@@ -840,6 +844,7 @@ internal abstract class StorageController<T>
                     databasePath,
                     symbolName,
                     csvPath,
+                    GetAggTradesCsvSchema(),
                     GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
                     ct);
             }

@@ -1,8 +1,8 @@
-﻿using System.Collections.Generic;
-using System;
-using Binance.Net.Enums;
-using System.ComponentModel.DataAnnotations;
+﻿using Binance.Net.Enums;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace CollectorModels.Models;
 

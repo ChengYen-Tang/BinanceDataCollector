@@ -1,18 +1,21 @@
+using BinanceDataCollector.Collectors.BinanceMarketData;
 using CollectorModels.Models.Storage;
 using DuckDB.NET.Data;
+using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
-using System.Reflection;
-using System.Collections.Concurrent;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
-using System.Threading;
 
 namespace BinanceDataCollector;
 
 internal static class DuckDbStorageHelper
 {
     private const int MarketDataImportBatchSize = 10_0000;
+    private const int MarketDataRowGroupSize = 524_288;
+    private const string TunedCatalogName = "storage";
+    private const string TunedStorageVersion = "v1.2.0";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -319,6 +322,7 @@ internal static class DuckDbStorageHelper
         string dbPath,
         string tableName,
         string csvPath,
+        AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
         CancellationToken ct = default)
     {
@@ -327,7 +331,7 @@ internal static class DuckDbStorageHelper
             ct.ThrowIfCancellationRequested();
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
-            ImportAggTradesCsv(connection, tableName, csvPath, sourceIsMicroseconds, replaceTail: true);
+            ImportAggTradesCsv(connection, tableName, csvPath, schema, sourceIsMicroseconds, replaceTail: true);
             await Task.CompletedTask;
         });
     }
@@ -336,6 +340,7 @@ internal static class DuckDbStorageHelper
         string dbPath,
         string tableName,
         string csvPath,
+        AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
         CancellationToken ct = default)
     {
@@ -344,7 +349,7 @@ internal static class DuckDbStorageHelper
             ct.ThrowIfCancellationRequested();
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
-            ImportAggTradesCsv(connection, tableName, csvPath, sourceIsMicroseconds, replaceTail: false);
+            ImportAggTradesCsv(connection, tableName, csvPath, schema, sourceIsMicroseconds, replaceTail: false);
             await Task.CompletedTask;
         });
     }
@@ -448,9 +453,42 @@ internal static class DuckDbStorageHelper
         if (!string.IsNullOrWhiteSpace(directoryPath))
             Directory.CreateDirectory(directoryPath);
 
+        if (RequiresLargeMarketDataRowGroups(normalizedPath))
+            return OpenAttachedConnection(normalizedPath, MarketDataRowGroupSize);
+
         DuckDBConnection connection = new($"Data Source={normalizedPath}");
         connection.Open();
         return connection;
+    }
+
+    private static DuckDBConnection OpenAttachedConnection(string normalizedPath, int rowGroupSize)
+    {
+        DuckDBConnection connection = new("Data Source=:memory:");
+        try
+        {
+            connection.Open();
+            string escapedPath = normalizedPath.Replace("'", "''", StringComparison.Ordinal);
+            ExecuteDuckDbNonQuery(connection, $"""
+                ATTACH '{escapedPath}' AS {QuoteIdentifier(TunedCatalogName)} (ROW_GROUP_SIZE {rowGroupSize}, STORAGE_VERSION '{TunedStorageVersion}');
+                USE {QuoteIdentifier(TunedCatalogName)};
+                """);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    private static bool RequiresLargeMarketDataRowGroups(string normalizedPath)
+    {
+        string? parentDirectoryName = Path.GetFileName(Path.GetDirectoryName(normalizedPath));
+        if (string.IsNullOrWhiteSpace(parentDirectoryName))
+            return false;
+
+        return string.Equals(parentDirectoryName, BaseMarketData.AggTradesDataType, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parentDirectoryName, BaseMarketData.BookDepthDataType, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void BeginExclusiveMode()
@@ -671,6 +709,7 @@ internal static class DuckDbStorageHelper
         DuckDBConnection connection,
         string tableName,
         string csvPath,
+        AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
         bool replaceTail)
     {
@@ -678,7 +717,7 @@ internal static class DuckDbStorageHelper
         Dictionary<long, AggTradeImportRow> batchDedup = new(MarketDataImportBatchSize);
         bool tailDeleted = !replaceTail;
         long replaceFrom = replaceTail
-            ? GetAggTradesCsvMinTimestamp(csvPath, sourceIsMicroseconds)
+            ? GetAggTradesCsvMinTimestamp(csvPath, schema, sourceIsMicroseconds)
             : 0;
 
         using StreamReader reader = new(csvPath);
@@ -695,7 +734,7 @@ internal static class DuckDbStorageHelper
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            AggTradeImportRow row = ParseAggTrade(line.AsSpan(), sourceIsMicroseconds);
+            AggTradeImportRow row = ParseAggTrade(line.AsSpan(), schema, sourceIsMicroseconds);
             batchDedup[row.ParquetAggTradeId] = row;
             if (batchDedup.Count >= MarketDataImportBatchSize)
                 FlushAggTradeBatch(connection, tableName, batchRows, batchDedup, ref tailDeleted, replaceFrom);
@@ -965,7 +1004,7 @@ internal static class DuckDbStorageHelper
         appender.Close();
     }
 
-    private static long GetAggTradesCsvMinTimestamp(string csvPath, bool sourceIsMicroseconds)
+    private static long GetAggTradesCsvMinTimestamp(string csvPath, AggTradesCsvSchema schema, bool sourceIsMicroseconds)
     {
         long? minTimestamp = null;
         using StreamReader reader = new(csvPath);
@@ -982,6 +1021,7 @@ internal static class DuckDbStorageHelper
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
+            ValidateAggTradesFieldCount(line.AsSpan(), schema);
             long timestamp = long.Parse(ReadCsvField(line.AsSpan(), 5), NumberStyles.Integer, InvariantCulture);
             if (!sourceIsMicroseconds)
                 timestamp *= 1000;
@@ -1020,8 +1060,9 @@ internal static class DuckDbStorageHelper
         return minTimestamp ?? throw new InvalidDataException($"CSV does not contain bookDepth rows: {csvPath}");
     }
 
-    private static AggTradeImportRow ParseAggTrade(ReadOnlySpan<char> line, bool sourceIsMicroseconds)
+    private static AggTradeImportRow ParseAggTrade(ReadOnlySpan<char> line, AggTradesCsvSchema schema, bool sourceIsMicroseconds)
     {
+        ValidateAggTradesFieldCount(line, schema);
         long transactTime = long.Parse(ReadCsvField(line, 5), NumberStyles.Integer, InvariantCulture);
         if (!sourceIsMicroseconds)
             transactTime *= 1000;
@@ -1073,8 +1114,37 @@ internal static class DuckDbStorageHelper
     private static bool IsAggTradesHeader(ReadOnlySpan<char> line)
         => ReadCsvField(line, 0).Equals("agg_trade_id".AsSpan(), StringComparison.OrdinalIgnoreCase);
 
+    private static void ValidateAggTradesFieldCount(ReadOnlySpan<char> line, AggTradesCsvSchema schema)
+    {
+        int fieldCount = GetCsvFieldCount(line);
+        int expectedFieldCount = schema switch
+        {
+            AggTradesCsvSchema.Spot => 8,
+            AggTradesCsvSchema.Futures => 7,
+            _ => throw new ArgumentOutOfRangeException(nameof(schema), schema, "Unsupported aggTrades CSV schema.")
+        };
+
+        if (fieldCount != expectedFieldCount)
+            throw new FormatException($"Unexpected aggTrades field count {fieldCount}. Expected {expectedFieldCount} for schema {schema}.");
+    }
+
     private static bool IsBookDepthHeader(ReadOnlySpan<char> line)
         => ReadCsvField(line, 0).Equals("timestamp".AsSpan(), StringComparison.OrdinalIgnoreCase);
+
+    private static int GetCsvFieldCount(ReadOnlySpan<char> line)
+    {
+        if (line.IsEmpty)
+            return 0;
+
+        int fieldCount = 1;
+        foreach (char character in line)
+        {
+            if (character == ',')
+                fieldCount++;
+        }
+
+        return fieldCount;
+    }
 
     private static void ExecuteDuckDbNonQuery(DuckDBConnection connection, string commandText)
     {
