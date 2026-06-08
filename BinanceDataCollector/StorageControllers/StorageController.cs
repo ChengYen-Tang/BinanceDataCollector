@@ -136,7 +136,7 @@ internal abstract class StorageController<T>
             upsertStopwatch.Stop();
             logger.LogInformation("Finish upserting {SymbolType}. Cost: {ElapsedMs}ms", typeof(T).Name, upsertStopwatch.ElapsedMilliseconds);
 
-            await EnsureStorageLayoutInitializedAsync(ct);
+            await MigrateLegacySharedDatabasesAsync(ct);
 
             Stopwatch deleteStopwatch = Stopwatch.StartNew();
             await DeleteDelistedSymbolsAsync(currentSymbols, delistedSymbols, ct);
@@ -149,27 +149,6 @@ internal abstract class StorageController<T>
             return Result.Fail(ex.Message);
         }
         return Result.Ok();
-    }
-
-    private async Task EnsureStorageLayoutInitializedAsync(CancellationToken ct)
-    {
-        foreach (string folderPath in GetStorageFolderPaths())
-            Directory.CreateDirectory(folderPath);
-
-        await MigrateLegacySharedDatabasesAsync(ct);
-    }
-
-    public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
-    {
-        Result<List<T>> result = await FetchMarketAsync(ct);
-        if (result.IsFailed)
-            return result;
-
-        Result applyResult = await ApplyMarketAsync(result.Value, ct);
-        if (applyResult.IsFailed)
-            return Result.Fail(applyResult.Errors);
-
-        return Result.Ok(result.Value);
     }
 
     public async Task<AsyncWorkItem<SymbolRows<Kline>>> UpdateKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
@@ -505,56 +484,81 @@ internal abstract class StorageController<T>
         await EnsureAggTradesStorageMigratedAsync(batch.Symbol, ct);
         string databasePath = GetAggTradesDatabasePath(batch.Symbol);
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(databasePath, DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup, ct);
         await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, SymbolDataTableName, AggTradesMicrosecondsBoundary, ct);
 
         logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
 
         MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
-        foreach (MarketDataDownloadFile file in sortedFiles)
+        bool symbolDbModified = false;
+        bool shouldExitEarly = false;
+        try
         {
-            string extractionDirectory = file.TempZipPath + ".__extract";
-
-            if (Directory.Exists(extractionDirectory))
-                Directory.Delete(extractionDirectory, true);
-            Directory.CreateDirectory(extractionDirectory);
-            try
+            foreach (MarketDataDownloadFile file in sortedFiles)
             {
-                string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                string extractionDirectory = file.TempZipPath + ".__extract";
+
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
+                Directory.CreateDirectory(extractionDirectory);
+                try
                 {
-                    LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
-                    await DuckDbStorageHelper.ReplaceAggTradesTailFromCsvAsync(
-                        databasePath,
-                        SymbolDataTableName,
-                        csvPath,
-                        GetAggTradesCsvSchema(),
-                        GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
-                        ct);
+                    string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
+                    foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                    {
+                        LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
+                        await DuckDbStorageHelper.ReplaceAggTradesTailFromCsvAsync(
+                            databasePath,
+                            SymbolDataTableName,
+                            csvPath,
+                            GetAggTradesCsvSchema(),
+                            GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
+                            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup,
+                            ct);
+                        symbolDbModified = true;
+
+                        if (ct.IsCancellationRequested)
+                        {
+                            shouldExitEarly = true;
+                            break;
+                        }
+                    }
+
+                    DeleteFileIfExists(file.TempZipPath);
+                    DeleteFileIfExists(file.TempChecksumPath);
+                    if (Directory.Exists(extractionDirectory))
+                        Directory.Delete(extractionDirectory, true);
+                    DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath)!);
+                }
+                catch
+                {
+                    if (Directory.Exists(extractionDirectory))
+                        Directory.Delete(extractionDirectory, true);
+                    throw;
                 }
 
-                DeleteFileIfExists(file.TempZipPath);
-                DeleteFileIfExists(file.TempChecksumPath);
-                if (Directory.Exists(extractionDirectory))
-                    Directory.Delete(extractionDirectory, true);
-                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath)!);
-            }
-            catch (OperationCanceledException)
-            {
-                if (Directory.Exists(extractionDirectory))
-                    Directory.Delete(extractionDirectory, true);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                if (Directory.Exists(extractionDirectory))
-                    Directory.Delete(extractionDirectory, true);
-                logger.LogError(ex,
-                    "Persist aggTrades archive failed. Market: {Market}, Symbol: {Symbol}, Period: {Period}, FileName: {FileName}",
-                    batch.MarketPathSegment, batch.Symbol, file.Period, file.FileName);
+                if (shouldExitEarly)
+                    break;
             }
         }
+        catch (OperationCanceledException)
+        {
+            shouldExitEarly = true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Persist aggTrades archive failed. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
+                batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
+        }
+        finally
+        {
+            if (symbolDbModified)
+                await DuckDbStorageHelper.CheckpointAsync(databasePath, CancellationToken.None);
+        }
+
+        if (shouldExitEarly)
+            return;
 
         logger.LogDebug("Finish persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
@@ -568,46 +572,77 @@ internal abstract class StorageController<T>
 
         string databasePath = GetBookDepthDatabasePath(batch.Symbol);
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(databasePath, DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup, ct);
 
         logger.LogDebug("Start persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
 
         MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
-        foreach (MarketDataDownloadFile file in sortedFiles)
+        bool symbolDbModified = false;
+        bool shouldExitEarly = false;
+        try
         {
-            string extractionDirectory = file.TempZipPath + ".__extract";
+            foreach (MarketDataDownloadFile file in sortedFiles)
+            {
+                string extractionDirectory = file.TempZipPath + ".__extract";
 
-            if (Directory.Exists(extractionDirectory))
-                Directory.Delete(extractionDirectory, true);
-            Directory.CreateDirectory(extractionDirectory);
-            try
-            {
-                string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
-                foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
-                    await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(databasePath, SymbolDataTableName, csvPath, ct);
+                if (Directory.Exists(extractionDirectory))
+                    Directory.Delete(extractionDirectory, true);
+                Directory.CreateDirectory(extractionDirectory);
+                try
+                {
+                    string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
+                    foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
+                    {
+                        await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(
+                            databasePath,
+                            SymbolDataTableName,
+                            csvPath,
+                            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup,
+                            ct);
+                        symbolDbModified = true;
 
-                DeleteFileIfExists(file.TempZipPath);
-                DeleteFileIfExists(file.TempChecksumPath);
-                if (Directory.Exists(extractionDirectory))
-                    Directory.Delete(extractionDirectory, true);
-                DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath)!);
-            }
-            catch (OperationCanceledException)
-            {
-                if (Directory.Exists(extractionDirectory))
-                    Directory.Delete(extractionDirectory, true);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                if (Directory.Exists(extractionDirectory))
-                    Directory.Delete(extractionDirectory, true);
-                logger.LogError(ex,
-                    "Persist bookDepth archive failed. Market: {Market}, Symbol: {Symbol}, Period: {Period}, FileName: {FileName}",
-                    batch.MarketPathSegment, batch.Symbol, file.Period, file.FileName);
+                        if (ct.IsCancellationRequested)
+                        {
+                            shouldExitEarly = true;
+                            break;
+                        }
+                    }
+
+                    DeleteFileIfExists(file.TempZipPath);
+                    DeleteFileIfExists(file.TempChecksumPath);
+                    if (Directory.Exists(extractionDirectory))
+                        Directory.Delete(extractionDirectory, true);
+                    DeleteDirectoryIfEmpty(Path.GetDirectoryName(file.TempZipPath)!);
+                }
+                catch
+                {
+                    if (Directory.Exists(extractionDirectory))
+                        Directory.Delete(extractionDirectory, true);
+                    throw;
+                }
+
+                if (shouldExitEarly)
+                    break;
             }
         }
+        catch (OperationCanceledException)
+        {
+            shouldExitEarly = true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Persist bookDepth archive failed. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
+                batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
+        }
+        finally
+        {
+            if (symbolDbModified)
+                await DuckDbStorageHelper.CheckpointAsync(databasePath, CancellationToken.None);
+        }
+
+        if (shouldExitEarly)
+            return;
 
         logger.LogDebug("Finish persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
@@ -742,30 +777,6 @@ internal abstract class StorageController<T>
     protected abstract Task<Result<IReadOnlyList<TakerLongShortRatioCsv>>> GetTakerLongShortRatiosAsync(T symbol, DateTime startTime, CancellationToken ct = default);
     protected abstract Task<Result<IReadOnlyList<FuturesBasisCsv>>> GetBasisAsync(T symbol, DateTime startTime, CancellationToken ct = default);
 
-    protected Task DeleteMarketDataSymbolDirectoriesAsync(IReadOnlyCollection<string> delistedSymbols, IReadOnlyCollection<string> marketDataTypes, CancellationToken ct = default)
-    {
-        if (delistedSymbols.Count == 0 || marketDataTypes.Count == 0)
-            return Task.CompletedTask;
-
-        foreach (string dataType in marketDataTypes)
-        {
-            string marketPath = GetMarketDataMarketPath(dataType);
-            if (!Directory.Exists(marketPath))
-                continue;
-
-            foreach (string symbol in delistedSymbols)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                string symbolPath = Path.Combine(marketPath, symbol);
-                if (Directory.Exists(symbolPath))
-                    Directory.Delete(symbolPath, true);
-            }
-        }
-
-        return Task.CompletedTask;
-    }
-
     protected Task DeleteOldAggTradesDataAsync(string symbolName, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -853,6 +864,7 @@ internal abstract class StorageController<T>
                     csvPath,
                     GetAggTradesCsvSchema(),
                     GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
+                    DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup,
                     ct);
             }
 
@@ -1039,28 +1051,6 @@ internal abstract class StorageController<T>
         long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, "snapshot_time", null, ct);
         if (!latest.HasValue)
             DeleteDatabaseFileIfExists(databasePath);
-    }
-
-    private IEnumerable<string> GetStorageFolderPaths()
-    {
-        yield return KlinePath;
-
-        if (IsFutures)
-        {
-            yield return PremiumIndexKlinePath;
-            yield return IndexPriceKlinePath;
-            yield return MarkPriceKlinePath;
-            yield return FundingRatePath;
-            yield return OpenInterestPath;
-            yield return TopLongShortPositionRatioPath;
-            yield return TopLongShortAccountRatioPath;
-            yield return GlobalLongShortAccountRatioPath;
-            yield return TakerLongShortRatioPath;
-            yield return BasisPath;
-            yield return GetBookDepthStorageFolderPath();
-        }
-
-        yield return GetAggTradesStorageFolderPath();
     }
 
     private async Task MigrateLegacySharedDatabasesAsync(CancellationToken ct)

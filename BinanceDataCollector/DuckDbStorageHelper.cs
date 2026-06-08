@@ -25,6 +25,7 @@ internal static class DuckDbStorageHelper
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     private static readonly ConcurrentDictionary<DbTableLockKey, SemaphoreSlim> TableLocks = new(new DbTableLockKeyComparer());
+    private static readonly ConcurrentDictionary<string, byte> DirtyDatabases = new(PathComparer);
     private static readonly Lock LifecycleSync = new();
     private static readonly ManualResetEventSlim NoActiveOperations = new(initialState: true);
     private static int activeOperations;
@@ -73,6 +74,7 @@ internal static class DuckDbStorageHelper
                 DeleteAllRows(connection, transaction, tableName);
                 InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
                 transaction.Commit();
+                MarkDatabaseDirty(normalizedPath);
             }
             finally
             {
@@ -111,6 +113,7 @@ internal static class DuckDbStorageHelper
                 DeleteRowsByJoinKey(connection, transaction, tableName, tempTables.RowsTableName, keyProperty.Name);
                 InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
                 transaction.Commit();
+                MarkDatabaseDirty(normalizedPath);
             }
             finally
             {
@@ -257,6 +260,7 @@ internal static class DuckDbStorageHelper
             parameter.Value = threshold;
             command.Parameters.Add(parameter);
             await command.ExecuteNonQueryAsync(CancellationToken.None);
+            MarkDatabaseDirty(normalizedPath);
         });
     }
 
@@ -282,6 +286,7 @@ internal static class DuckDbStorageHelper
             parameter.Value = threshold;
             command.Parameters.Add(parameter);
             await command.ExecuteNonQueryAsync(CancellationToken.None);
+            MarkDatabaseDirty(normalizedPath);
         });
     }
 
@@ -300,6 +305,7 @@ internal static class DuckDbStorageHelper
             using DuckDBCommand command = connection.CreateCommand();
             command.CommandText = $"DROP TABLE IF EXISTS {QuoteIdentifier(tableName)};";
             await command.ExecuteNonQueryAsync(CancellationToken.None);
+            MarkDatabaseDirty(normalizedPath);
         });
     }
 
@@ -329,14 +335,17 @@ internal static class DuckDbStorageHelper
         string csvPath,
         AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
+        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
+            EnsureDatabaseCreatedCore(normalizedPath, profile);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
             ImportAggTradesCsv(connection, tableName, csvPath, schema, sourceIsMicroseconds, replaceTail: true);
+            MarkDatabaseDirty(normalizedPath);
             await Task.CompletedTask;
         });
     }
@@ -347,14 +356,17 @@ internal static class DuckDbStorageHelper
         string csvPath,
         AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
+        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
+            EnsureDatabaseCreatedCore(normalizedPath, profile);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
             ImportAggTradesCsv(connection, tableName, csvPath, schema, sourceIsMicroseconds, replaceTail: false);
+            MarkDatabaseDirty(normalizedPath);
             await Task.CompletedTask;
         });
     }
@@ -363,20 +375,24 @@ internal static class DuckDbStorageHelper
         string dbPath,
         string tableName,
         string csvPath,
+        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
+            EnsureDatabaseCreatedCore(normalizedPath, profile);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureBookDepthTable(connection, tableName);
             ImportBookDepthCsv(connection, tableName, csvPath);
+            MarkDatabaseDirty(normalizedPath);
             await Task.CompletedTask;
         });
     }
 
     public static async Task CheckpointAsync(string dbPath, CancellationToken ct = default)
     {
+        string normalizedPath = Path.GetFullPath(dbPath);
         await WithConnectionAsync(dbPath, async connection =>
         {
             ct.ThrowIfCancellationRequested();
@@ -384,6 +400,7 @@ internal static class DuckDbStorageHelper
             ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
             await Task.CompletedTask;
         }, ct);
+        ClearDirtyDatabase(normalizedPath);
     }
 
     public static async Task NormalizeAggTradesStoredTimeAsync(
@@ -410,6 +427,7 @@ internal static class DuckDbStorageHelper
                 """;
             command.Parameters.Add(new DuckDBParameter("microseconds_boundary", microsecondsBoundary));
             command.ExecuteNonQuery();
+            MarkDatabaseDirty(normalizedPath);
             await Task.CompletedTask;
         });
     }
@@ -427,10 +445,7 @@ internal static class DuckDbStorageHelper
             if (!string.IsNullOrWhiteSpace(directoryPath))
                 Directory.CreateDirectory(directoryPath);
 
-            if (File.Exists(normalizedPath))
-                return;
-
-            using DuckDBConnection connection = OpenConnectionForInitialization(normalizedPath, profile);
+            EnsureDatabaseCreatedCore(normalizedPath, profile);
             await Task.CompletedTask;
         }, ct);
     }
@@ -466,6 +481,7 @@ internal static class DuckDbStorageHelper
                 DETACH {QuoteIdentifier(attachedCatalog)};
                 """);
 
+            MarkDatabaseDirty(normalizedTargetPath);
             await Task.CompletedTask;
         }, ct);
     }
@@ -503,6 +519,27 @@ internal static class DuckDbStorageHelper
 
                 using DuckDBConnection connection = OpenConnection(normalizedPath);
                 ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
+                ClearDirtyDatabase(normalizedPath);
+            }
+
+            return Task.CompletedTask;
+        }, ct);
+
+    public static Task CheckpointDirtyDatabasesAsync(CancellationToken ct = default)
+        => ExecuteExclusiveAsync(() =>
+        {
+            foreach (string dbPath in DirtyDatabases.Keys.OrderBy(static path => path, PathComparer))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!File.Exists(dbPath))
+                {
+                    ClearDirtyDatabase(dbPath);
+                    continue;
+                }
+
+                using DuckDBConnection connection = OpenConnection(dbPath);
+                ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
+                ClearDirtyDatabase(dbPath);
             }
 
             return Task.CompletedTask;
@@ -518,6 +555,24 @@ internal static class DuckDbStorageHelper
         connection.Open();
         return connection;
     }
+
+    private static void EnsureDatabaseCreatedCore(string normalizedPath, DatabaseInitializationProfile profile)
+    {
+        string? directoryPath = Path.GetDirectoryName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+            Directory.CreateDirectory(directoryPath);
+
+        if (File.Exists(normalizedPath))
+            return;
+
+        using DuckDBConnection connection = OpenConnectionForInitialization(normalizedPath, profile);
+    }
+
+    private static void MarkDatabaseDirty(string normalizedPath)
+        => DirtyDatabases[normalizedPath] = 0;
+
+    private static void ClearDirtyDatabase(string normalizedPath)
+        => DirtyDatabases.TryRemove(normalizedPath, out _);
 
     private static DuckDBConnection OpenConnectionForInitialization(string normalizedPath, DatabaseInitializationProfile profile)
     {

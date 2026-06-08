@@ -38,7 +38,7 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
         productionLine.Stop();
         await hangfireJob.WaitForIdleAsync(CancellationToken.None);
         backgroundJobServer.Dispose();
-        await DuckDbStorageHelper.CheckpointStorageAsync(DuckDbStorageArchiveHelper.StorageRootPath, cancellationToken);
+        await DuckDbStorageHelper.CheckpointDirtyDatabasesAsync(cancellationToken);
         logger.LogInformation("Worker stopped at: {time}", DateTimeOffset.Now);
     }
 }
@@ -142,6 +142,7 @@ public class HangfireJob
 
         ct.ThrowIfCancellationRequested();
         logger.LogInformation("Start packaging DuckDB archive at: {time}", DateTimeOffset.Now);
+        await DuckDbStorageHelper.CheckpointDirtyDatabasesAsync(CancellationToken.None);
         bool packaged = await DuckDbStorageArchiveHelper.FinalizeArchiveAsync(logger, ct);
         if (packaged)
             logger.LogInformation("Finish packaging DuckDB archive at: {time}", DateTimeOffset.Now);
