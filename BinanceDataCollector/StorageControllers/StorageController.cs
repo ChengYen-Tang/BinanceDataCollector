@@ -23,12 +23,9 @@ internal enum AggTradesTimeUnit
 internal abstract class StorageController<T>
     where T : class
 {
-    private readonly record struct DatabaseBootstrapPlan(
-        string DatabasePath,
-        DuckDbStorageHelper.DatabaseInitializationProfile Profile);
-
     private const long AggTradesMicrosecondsBoundary = 1_000_000_000_000_000L;
     private const int BinanceApiModelRowsInitialCapacity = 1_500;
+    private const string SymbolDataTableName = "data";
     protected readonly IServiceProvider serviceProvider;
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
@@ -139,7 +136,7 @@ internal abstract class StorageController<T>
             upsertStopwatch.Stop();
             logger.LogInformation("Finish upserting {SymbolType}. Cost: {ElapsedMs}ms", typeof(T).Name, upsertStopwatch.ElapsedMilliseconds);
 
-            await EnsureConfiguredDatabasesCreatedAsync(ct);
+            await EnsureStorageLayoutInitializedAsync(ct);
 
             Stopwatch deleteStopwatch = Stopwatch.StartNew();
             await DeleteDelistedSymbolsAsync(currentSymbols, delistedSymbols, ct);
@@ -154,23 +151,12 @@ internal abstract class StorageController<T>
         return Result.Ok();
     }
 
-    private async Task EnsureConfiguredDatabasesCreatedAsync(CancellationToken ct)
+    private async Task EnsureStorageLayoutInitializedAsync(CancellationToken ct)
     {
-        foreach (DatabaseBootstrapPlan plan in GetDatabaseBootstrapPlans())
-            await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(plan.DatabasePath, plan.Profile, ct);
-    }
+        foreach (string folderPath in GetStorageFolderPaths())
+            Directory.CreateDirectory(folderPath);
 
-    private IReadOnlyList<DatabaseBootstrapPlan> GetDatabaseBootstrapPlans()
-    {
-        List<DatabaseBootstrapPlan> plans =
-        [
-            new(GetAggTradesDatabasePath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup)
-        ];
-
-        if (IsFutures)
-            plans.Add(new(GetBookDepthDatabasePath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup));
-
-        return plans;
+        await MigrateLegacySharedDatabasesAsync(ct);
     }
 
     public async Task<Result<List<T>>> UpdateMocketAsync(CancellationToken ct = default)
@@ -424,7 +410,7 @@ internal abstract class StorageController<T>
             MarketPathSegment, typeof(T).Name, message);
 
     protected async Task InsertDeduplicatedRowsAsync<TEntity, TKey>(
-        string dbPath,
+        string dbFolderPath,
         SymbolRows<TEntity> batch,
         string keyColumn,
         Func<TEntity, TKey> getKey,
@@ -457,8 +443,9 @@ internal abstract class StorageController<T>
 
             try
             {
+                string databasePath = GetSymbolDatabasePath(dbFolderPath, batch.SymbolName);
                 logger.LogDebug("Start inserting {DataType}. Count: {Count}", typeof(TEntity).Name, rows.Count);
-                await DuckDbStorageHelper.UpsertRowsAsync(dbPath, batch.SymbolName, rows, keyColumn, ct);
+                await DuckDbStorageHelper.UpsertRowsAsync(databasePath, SymbolDataTableName, rows, keyColumn, ct);
                 logger.LogDebug("Finish inserting.");
             }
             catch (Exception ex)
@@ -494,8 +481,8 @@ internal abstract class StorageController<T>
     protected Task InsertGlobalLongShortAccountRatiosAsync(SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
         => InsertLongShortRatiosAsync(GlobalLongShortAccountRatioPath, batch, ct);
 
-    private Task InsertLongShortRatiosAsync(string dbPath, SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
-        => InsertDeduplicatedRowsAsync(dbPath, batch, nameof(LongShortRatioCsv.Timestamp), item => item.Timestamp, ct);
+    private Task InsertLongShortRatiosAsync(string dbFolderPath, SymbolRows<LongShortRatioCsv> batch, CancellationToken ct = default)
+        => InsertDeduplicatedRowsAsync(dbFolderPath, batch, nameof(LongShortRatioCsv.Timestamp), item => item.Timestamp, ct);
 
     protected Task InsertTakerLongShortRatiosAsync(SymbolRows<TakerLongShortRatioCsv> batch, CancellationToken ct = default)
         => InsertDeduplicatedRowsAsync(TakerLongShortRatioPath, batch, nameof(TakerLongShortRatioCsv.Timestamp), item => item.Timestamp, ct);
@@ -516,9 +503,10 @@ internal abstract class StorageController<T>
         ct.ThrowIfCancellationRequested();
 
         await EnsureAggTradesStorageMigratedAsync(batch.Symbol, ct);
-        string databasePath = GetAggTradesDatabasePath();
+        string databasePath = GetAggTradesDatabasePath(batch.Symbol);
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, batch.Symbol, AggTradesMicrosecondsBoundary, ct);
+        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(databasePath, DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup, ct);
+        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, SymbolDataTableName, AggTradesMicrosecondsBoundary, ct);
 
         logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
@@ -539,7 +527,7 @@ internal abstract class StorageController<T>
                     LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
                     await DuckDbStorageHelper.ReplaceAggTradesTailFromCsvAsync(
                         databasePath,
-                        batch.Symbol,
+                        SymbolDataTableName,
                         csvPath,
                         GetAggTradesCsvSchema(),
                         GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
@@ -578,8 +566,9 @@ internal abstract class StorageController<T>
             return;
         ct.ThrowIfCancellationRequested();
 
-        string databasePath = GetBookDepthDatabasePath();
+        string databasePath = GetBookDepthDatabasePath(batch.Symbol);
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(databasePath, DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup, ct);
 
         logger.LogDebug("Start persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
@@ -596,7 +585,7 @@ internal abstract class StorageController<T>
             {
                 string[] extractedCsvPaths = await ExtractArchiveEntriesAsync(file.TempZipPath, extractionDirectory, ct);
                 foreach (string csvPath in extractedCsvPaths.OrderBy(GetMarketDataCsvSortKey))
-                    await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(databasePath, batch.Symbol, csvPath, ct);
+                    await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(databasePath, SymbolDataTableName, csvPath, ct);
 
                 DeleteFileIfExists(file.TempZipPath);
                 DeleteFileIfExists(file.TempChecksumPath);
@@ -632,28 +621,28 @@ internal abstract class StorageController<T>
         string symbolName = GetSymbolName(symbol);
         await EnsureAggTradesStorageMigratedAsync(symbolName, ct);
 
-        string databasePath = GetAggTradesDatabasePath();
+        string databasePath = GetAggTradesDatabasePath(symbolName);
         if (!File.Exists(databasePath))
             return yearsReserved;
 
-        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, symbolName, AggTradesMicrosecondsBoundary, ct);
-        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "transact_time", null, ct);
+        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, SymbolDataTableName, AggTradesMicrosecondsBoundary, ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, "transact_time", null, ct);
         return latest.HasValue ? FromAggTradesUnixTime(latest.Value) : yearsReserved;
     }
 
     public virtual async Task<DateTime> GetLastBookDepthAsync(T symbol, CancellationToken ct = default)
     {
         string symbolName = GetSymbolName(symbol);
-        string databasePath = GetBookDepthDatabasePath();
+        string databasePath = GetBookDepthDatabasePath(symbolName);
         if (!File.Exists(databasePath))
             return yearsReserved;
 
-        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "snapshot_time", null, ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, "snapshot_time", null, ct);
         return latest.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(latest.Value).UtcDateTime : yearsReserved;
     }
 
     protected async Task<DateTime> GetLastTimestampAsync(
-        string dbPath,
+        string dbFolderPath,
         string symbolName,
         string columnName,
         string dataType,
@@ -663,7 +652,8 @@ internal abstract class StorageController<T>
     {
         try
         {
-            long? latest = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, symbolName, columnName, filters, ct);
+            string databasePath = GetSymbolDatabasePath(dbFolderPath, symbolName);
+            long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, columnName, filters, ct);
             return latest.HasValue
                 ? DateTimeOffset.FromUnixTimeMilliseconds(latest.Value).UtcDateTime
                 : yearsReserved;
@@ -672,36 +662,42 @@ internal abstract class StorageController<T>
         {
             logger.LogError(ex,
                 "Get last time failed. DataType: {DataType}, Symbol: {Symbol}, Interval: {Interval}, Column: {Column}, DatabasePath: {DatabasePath}",
-                dataType, symbolName, interval, columnName, dbPath);
+                dataType, symbolName, interval, columnName, GetSymbolDatabasePath(dbFolderPath, symbolName));
             throw;
         }
     }
 
-    protected async Task DeleteSymbolRowsBeforeAsync(string dbPath, string symbolName, string columnName, CancellationToken ct = default)
-        => await DuckDbStorageHelper.DeleteRowsBeforeAsync(dbPath, symbolName, columnName, new DateTimeOffset(yearsReserved).ToUnixTimeMilliseconds(), ct);
+    protected async Task DeleteSymbolRowsBeforeAsync(string dbFolderPath, string symbolName, string columnName, CancellationToken ct = default)
+    {
+        string dbPath = GetSymbolDatabasePath(dbFolderPath, symbolName);
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(dbPath, SymbolDataTableName, columnName, new DateTimeOffset(yearsReserved).ToUnixTimeMilliseconds(), ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(dbPath, SymbolDataTableName, columnName, null, ct);
+        if (!latest.HasValue)
+            DeleteDatabaseFileIfExists(dbPath);
+    }
 
     protected Task<List<string>> GetStoredSymbolNamesAsync(CancellationToken ct = default)
         => DuckDbStorageHelper.GetStringValuesAsync(SymbolInfoPath, MarketPathSegment, "Name", ct);
 
-    protected async Task DeleteSymbolTablesAsync(IEnumerable<string> dbPaths, IReadOnlyCollection<string> currentSymbols, CancellationToken ct = default)
+    protected async Task DeleteSymbolDatabasesAsync(IEnumerable<string> folderPaths, IReadOnlyCollection<string> currentSymbols, CancellationToken ct = default)
     {
         HashSet<string> currentSymbolSet = new(currentSymbols, StringComparer.OrdinalIgnoreCase);
-        foreach (string dbPath in dbPaths)
+        foreach (string folderPath in folderPaths)
         {
-            List<string> staleTableNames = await GetStaleSymbolTableNamesAsync(dbPath, currentSymbolSet, ct);
-            foreach (string tableName in staleTableNames)
+            foreach (string dbPath in GetStaleSymbolDatabasePaths(folderPath, currentSymbolSet))
             {
                 ct.ThrowIfCancellationRequested();
-                await DuckDbStorageHelper.DropTableIfExistsAsync(dbPath, tableName, ct);
+                DeleteDatabaseFileIfExists(dbPath);
             }
         }
     }
 
-    protected async Task<List<string>> GetStaleSymbolTableNamesAsync(string dbPath, IReadOnlySet<string> currentSymbols, CancellationToken ct = default)
-    {
-        List<string> tableNames = await DuckDbStorageHelper.GetTableNamesAsync(dbPath, ct);
-        return [.. tableNames.Where(tableName => !currentSymbols.Contains(tableName))];
-    }
+    protected List<string> GetStaleSymbolDatabasePaths(string folderPath, IReadOnlySet<string> currentSymbols)
+        => !Directory.Exists(folderPath)
+            ? []
+            : [.. Directory
+                .EnumerateFiles(folderPath, "*.duckdb", SearchOption.TopDirectoryOnly)
+                .Where(path => !currentSymbols.Contains(Path.GetFileNameWithoutExtension(path)))];
 
     protected static long ToUnixMilliseconds(DateTime value)
         => new DateTimeOffset(value).ToUnixTimeMilliseconds();
@@ -778,7 +774,7 @@ internal abstract class StorageController<T>
         if (Directory.Exists(legacySymbolPath))
             Directory.Delete(legacySymbolPath, true);
 
-        string databasePath = GetAggTradesDatabasePath();
+        string databasePath = GetAggTradesDatabasePath(symbolName);
         if (!File.Exists(databasePath))
             return Task.CompletedTask;
 
@@ -787,13 +783,7 @@ internal abstract class StorageController<T>
 
     protected async Task DeleteAggTradesStorageAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        HashSet<string> currentSymbolSet = new(currentSymbols, StringComparer.OrdinalIgnoreCase);
-        List<string> staleTableNames = await GetStaleSymbolTableNamesAsync(GetAggTradesDatabasePath(), currentSymbolSet, ct);
-        foreach (string tableName in staleTableNames)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DuckDbStorageHelper.DropTableIfExistsAsync(GetAggTradesDatabasePath(), tableName, ct);
-        }
+        await DeleteSymbolDatabasesAsync([GetAggTradesStorageFolderPath()], currentSymbols, ct);
 
         foreach (string symbol in delistedSymbols)
         {
@@ -808,23 +798,15 @@ internal abstract class StorageController<T>
     {
         ct.ThrowIfCancellationRequested();
 
-        string databasePath = GetBookDepthDatabasePath();
+        string databasePath = GetBookDepthDatabasePath(symbolName);
         if (!File.Exists(databasePath))
             return Task.CompletedTask;
 
         return DeleteOldBookDepthRowsAsync(databasePath, symbolName, ct);
     }
 
-    protected async Task DeleteBookDepthStorageAsync(IReadOnlyCollection<string> currentSymbols, CancellationToken ct = default)
-    {
-        HashSet<string> currentSymbolSet = new(currentSymbols, StringComparer.OrdinalIgnoreCase);
-        List<string> staleTableNames = await GetStaleSymbolTableNamesAsync(GetBookDepthDatabasePath(), currentSymbolSet, ct);
-        foreach (string tableName in staleTableNames)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DuckDbStorageHelper.DropTableIfExistsAsync(GetBookDepthDatabasePath(), tableName, ct);
-        }
-    }
+    protected Task DeleteBookDepthStorageAsync(IReadOnlyCollection<string> currentSymbols, CancellationToken ct = default)
+        => DeleteSymbolDatabasesAsync([GetBookDepthStorageFolderPath()], currentSymbols, ct);
 
     private async Task EnsureAggTradesStorageMigratedAsync(string symbolName, CancellationToken ct)
     {
@@ -834,9 +816,9 @@ internal abstract class StorageController<T>
         if (!Directory.Exists(legacySymbolPath))
             return;
 
-        string databasePath = GetAggTradesDatabasePath();
+        string databasePath = GetAggTradesDatabasePath(symbolName);
         long? existingLatest = File.Exists(databasePath)
-            ? await DuckDbStorageHelper.GetMaxInt64Async(databasePath, symbolName, "transact_time", null, ct)
+            ? await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, "transact_time", null, ct)
             : null;
         if (existingLatest.HasValue)
         {
@@ -867,7 +849,7 @@ internal abstract class StorageController<T>
                 LogUnexpectedAggTradesTimeUnitIfNeeded(csvPath);
                 await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
                     databasePath,
-                    symbolName,
+                    SymbolDataTableName,
                     csvPath,
                     GetAggTradesCsvSchema(),
                     GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
@@ -884,11 +866,17 @@ internal abstract class StorageController<T>
         }
     }
 
-    private string GetAggTradesDatabasePath()
-        => Path.Combine(DataPath, BaseMarketData.AggTradesDataType, $"{MarketPathSegment}.duckdb");
+    private string GetAggTradesStorageFolderPath()
+        => Path.Combine(DataPath, BaseMarketData.AggTradesDataType, MarketPathSegment);
 
-    private string GetBookDepthDatabasePath()
-        => Path.Combine(DataPath, BaseMarketData.BookDepthDataType, $"{MarketPathSegment}.duckdb");
+    private string GetAggTradesDatabasePath(string symbol)
+        => GetSymbolDatabasePath(GetAggTradesStorageFolderPath(), symbol);
+
+    private string GetBookDepthStorageFolderPath()
+        => Path.Combine(DataPath, BaseMarketData.BookDepthDataType, MarketPathSegment);
+
+    private string GetBookDepthDatabasePath(string symbol)
+        => GetSymbolDatabasePath(GetBookDepthStorageFolderPath(), symbol);
 
     private string GetLegacyAggTradesSymbolPath(string symbol)
         => GetMarketDataSymbolPath(BaseMarketData.AggTradesDataType, symbol);
@@ -984,17 +972,17 @@ internal abstract class StorageController<T>
 
     private async Task DeleteOldAggTradesRowsAsync(string databasePath, string tableName, CancellationToken ct)
     {
-        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, tableName, AggTradesMicrosecondsBoundary, ct);
+        await DuckDbStorageHelper.NormalizeAggTradesStoredTimeAsync(databasePath, SymbolDataTableName, AggTradesMicrosecondsBoundary, ct);
         await DuckDbStorageHelper.DeleteRowsBeforeAsync(
             databasePath,
-            tableName,
+            SymbolDataTableName,
             "transact_time",
             ToAggTradesUnixTime(yearsReserved),
             ct);
 
-        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "transact_time", null, ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, "transact_time", null, ct);
         if (!latest.HasValue)
-            await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
+            DeleteDatabaseFileIfExists(databasePath);
     }
 
     protected virtual AggTradesTimeUnit GetAggTradesTimeUnitForTimestamp(DateTime timestamp)
@@ -1047,11 +1035,111 @@ internal abstract class StorageController<T>
 
     private async Task DeleteOldBookDepthRowsAsync(string databasePath, string tableName, CancellationToken ct)
     {
-        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, tableName, "snapshot_time", ToUnixMilliseconds(yearsReserved), ct);
-        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, tableName, "snapshot_time", null, ct);
+        await DuckDbStorageHelper.DeleteRowsBeforeAsync(databasePath, SymbolDataTableName, "snapshot_time", ToUnixMilliseconds(yearsReserved), ct);
+        long? latest = await DuckDbStorageHelper.GetMaxInt64Async(databasePath, SymbolDataTableName, "snapshot_time", null, ct);
         if (!latest.HasValue)
-            await DuckDbStorageHelper.DropTableIfExistsAsync(databasePath, tableName, ct);
+            DeleteDatabaseFileIfExists(databasePath);
     }
+
+    private IEnumerable<string> GetStorageFolderPaths()
+    {
+        yield return KlinePath;
+
+        if (IsFutures)
+        {
+            yield return PremiumIndexKlinePath;
+            yield return IndexPriceKlinePath;
+            yield return MarkPriceKlinePath;
+            yield return FundingRatePath;
+            yield return OpenInterestPath;
+            yield return TopLongShortPositionRatioPath;
+            yield return TopLongShortAccountRatioPath;
+            yield return GlobalLongShortAccountRatioPath;
+            yield return TakerLongShortRatioPath;
+            yield return BasisPath;
+            yield return GetBookDepthStorageFolderPath();
+        }
+
+        yield return GetAggTradesStorageFolderPath();
+    }
+
+    private async Task MigrateLegacySharedDatabasesAsync(CancellationToken ct)
+    {
+        foreach ((string folderPath, DuckDbStorageHelper.DatabaseInitializationProfile profile) in GetLegacySharedDatabaseFolders())
+            await MigrateLegacySharedDatabaseAsync(folderPath, profile, ct);
+    }
+
+    private IEnumerable<(string FolderPath, DuckDbStorageHelper.DatabaseInitializationProfile Profile)> GetLegacySharedDatabaseFolders()
+    {
+        yield return (KlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+
+        if (IsFutures)
+        {
+            yield return (PremiumIndexKlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (IndexPriceKlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (MarkPriceKlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (FundingRatePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (OpenInterestPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (TopLongShortPositionRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (TopLongShortAccountRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (GlobalLongShortAccountRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (TakerLongShortRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (BasisPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+            yield return (GetBookDepthStorageFolderPath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+        }
+
+        yield return (GetAggTradesStorageFolderPath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+    }
+
+    private async Task MigrateLegacySharedDatabaseAsync(
+        string marketFolderPath,
+        DuckDbStorageHelper.DatabaseInitializationProfile profile,
+        CancellationToken ct)
+    {
+        string legacyDatabasePath = GetLegacyMarketDatabasePath(marketFolderPath);
+        if (!File.Exists(legacyDatabasePath))
+            return;
+
+        List<string> tableNames = await DuckDbStorageHelper.GetTableNamesAsync(legacyDatabasePath, ct);
+        if (tableNames.Count == 0)
+        {
+            DeleteDatabaseFileIfExists(legacyDatabasePath);
+            return;
+        }
+
+        logger.LogInformation(
+            "Start migrating legacy shared DuckDB. Market: {Market}, LegacyDatabasePath: {LegacyDatabasePath}, TableCount: {TableCount}",
+            MarketPathSegment,
+            legacyDatabasePath,
+            tableNames.Count);
+
+        foreach (string symbolName in tableNames)
+        {
+            ct.ThrowIfCancellationRequested();
+            string targetDatabasePath = GetSymbolDatabasePath(marketFolderPath, symbolName);
+            await DuckDbStorageHelper.CopyTableAsync(
+                legacyDatabasePath,
+                symbolName,
+                targetDatabasePath,
+                SymbolDataTableName,
+                profile,
+                ct);
+        }
+
+        DeleteDatabaseFileIfExists(legacyDatabasePath);
+
+        logger.LogInformation(
+            "Finish migrating legacy shared DuckDB. Market: {Market}, LegacyDatabasePath: {LegacyDatabasePath}, MigratedSymbols: {MigratedSymbols}",
+            MarketPathSegment,
+            legacyDatabasePath,
+            tableNames.Count);
+    }
+
+    private static string GetSymbolDatabasePath(string folderPath, string symbol)
+        => Path.Combine(folderPath, $"{symbol}.duckdb");
+
+    private static string GetLegacyMarketDatabasePath(string marketFolderPath)
+        => Path.Combine(Path.GetDirectoryName(marketFolderPath)!, Path.GetFileName(marketFolderPath) + ".duckdb");
 
     private string GetMarketDataMarketPath(string dataType)
         => Path.Combine(MarketDataPath, dataType, MarketPathSegment);
@@ -1066,6 +1154,15 @@ internal abstract class StorageController<T>
     {
         if (File.Exists(path))
             File.Delete(path);
+    }
+
+    private static void DeleteDatabaseFileIfExists(string databasePath)
+    {
+        if (!File.Exists(databasePath))
+            return;
+
+        File.Delete(databasePath);
+        DeleteDirectoryIfEmpty(Path.GetDirectoryName(databasePath));
     }
 
     private static void DeleteDirectoryIfEmpty(string? path)

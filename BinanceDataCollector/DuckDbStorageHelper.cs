@@ -435,6 +435,41 @@ internal static class DuckDbStorageHelper
         }, ct);
     }
 
+    public static async Task CopyTableAsync(
+        string sourceDbPath,
+        string sourceTableName,
+        string targetDbPath,
+        string targetTableName,
+        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
+        CancellationToken ct = default)
+    {
+        string normalizedSourcePath = Path.GetFullPath(sourceDbPath);
+        if (!File.Exists(normalizedSourcePath))
+            return;
+
+        await EnsureDatabaseCreatedAsync(targetDbPath, profile, ct);
+
+        await WithTableLockAsync(targetDbPath, targetTableName, async normalizedTargetPath =>
+        {
+            ct.ThrowIfCancellationRequested();
+
+            using DuckDBConnection connection = OpenConnection(normalizedTargetPath);
+            string escapedSourcePath = normalizedSourcePath.Replace("'", "''", StringComparison.Ordinal);
+            string attachedCatalog = "__legacy_source__";
+
+            ExecuteDuckDbNonQuery(connection, $"""
+                ATTACH '{escapedSourcePath}' AS {QuoteIdentifier(attachedCatalog)};
+                DROP TABLE IF EXISTS {QuoteIdentifier(targetTableName)};
+                CREATE TABLE {QuoteIdentifier(targetTableName)} AS
+                SELECT *
+                FROM {QuoteIdentifier(attachedCatalog)}.{QuoteIdentifier(sourceTableName)};
+                DETACH {QuoteIdentifier(attachedCatalog)};
+                """);
+
+            await Task.CompletedTask;
+        }, ct);
+    }
+
     public static void CloseAllConnections()
         => ExecuteExclusiveAsync(static () => Task.CompletedTask).GetAwaiter().GetResult();
 

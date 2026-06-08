@@ -50,7 +50,7 @@ public sealed class MarketDataIntegrityChecker(
             return;
         }
 
-        foreach (string databasePath in Directory.EnumerateFiles(dataTypeFolder, "*.duckdb", SearchOption.TopDirectoryOnly).Order(StringComparer.OrdinalIgnoreCase))
+        foreach (string databasePath in Directory.EnumerateFiles(dataTypeFolder, "*.duckdb", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase))
         {
             ct.ThrowIfCancellationRequested();
             summary.DatabaseCount++;

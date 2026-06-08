@@ -14,6 +14,7 @@ internal sealed class SqlServerToDuckDbMigrator(
     IOptions<MigrationOptions> options,
     ILogger<SqlServerToDuckDbMigrator> logger)
 {
+    private const string SymbolDataTableName = "data";
     private static readonly DatasetIntegrityPolicy<Kline> OneMinuteKlinePolicy =
         new("Kline", item => item.CloseTime, TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(30), 2);
 
@@ -101,11 +102,10 @@ internal sealed class SqlServerToDuckDbMigrator(
             recreateTable: true,
             ct);
 
-        string klineDbPath = GetMarketDbPath("Kline", "Spot");
         await ForEachSymbolAsync(
             symbols,
             (symbol, token) => MigrateShardedTableAsync(
-                klineDbPath,
+                GetMarketDbPath("Kline", "Spot", symbol.Name),
                 "SpotBinanceKlines",
                 symbol.Name,
                 nameof(Kline.CloseTime),
@@ -163,7 +163,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         ContractType contractType = GetContractType(symbol);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("Kline", market),
+            GetMarketDbPath("Kline", market, symbol.Name),
             "FuturesCoinBinanceKlines",
             symbol.Name,
             nameof(Kline.CloseTime),
@@ -173,7 +173,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("PremiumIndexKline", market),
+            GetMarketDbPath("PremiumIndexKline", market, symbol.Name),
             "FuturesCoinBinancePremiumIndexKlines",
             symbol.Name,
             nameof(PremiumIndexKline.CloseTime),
@@ -183,7 +183,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("IndexPriceKline", market),
+            GetMarketDbPath("IndexPriceKline", market, symbol.Name),
             "FuturesCoinBinanceIndexPriceKlines",
             symbol.Name,
             nameof(PremiumIndexKline.CloseTime),
@@ -193,7 +193,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("MarkPriceKline", market),
+            GetMarketDbPath("MarkPriceKline", market, symbol.Name),
             "FuturesCoinBinanceMarkPriceKlines",
             symbol.Name,
             nameof(PremiumIndexKline.CloseTime),
@@ -203,7 +203,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("FundingRate", market),
+            GetMarketDbPath("FundingRate", market, symbol.Name),
             "FuturesCoinFundingRates",
             symbol.Name,
             nameof(FundingRate.FundingTime),
@@ -213,7 +213,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("OpenInterestHistory", market),
+            GetMarketDbPath("OpenInterestHistory", market, symbol.Name),
             "FuturesCoinOpenInterestHistories",
             symbol.Name,
             nameof(OpenInterestHistory.Timestamp),
@@ -223,7 +223,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("Basis", market),
+            GetMarketDbPath("Basis", market, symbol.Name),
             "FuturesCoinBasisHistories",
             symbol.Name,
             nameof(FuturesBasisCsv.Timestamp),
@@ -233,7 +233,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("TopLongShortPositionRatio", market),
+            GetMarketDbPath("TopLongShortPositionRatio", market, symbol.Name),
             "FuturesCoinTopLongShortPositionRatios",
             symbol.Name,
             nameof(LongShortRatioCsv.Timestamp),
@@ -243,7 +243,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("TopLongShortAccountRatio", market),
+            GetMarketDbPath("TopLongShortAccountRatio", market, symbol.Name),
             "FuturesCoinTopLongShortAccountRatios",
             symbol.Name,
             nameof(LongShortRatioCsv.Timestamp),
@@ -253,7 +253,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("GlobalLongShortAccountRatio", market),
+            GetMarketDbPath("GlobalLongShortAccountRatio", market, symbol.Name),
             "FuturesCoinGlobalLongShortAccountRatios",
             symbol.Name,
             nameof(LongShortRatioCsv.Timestamp),
@@ -263,7 +263,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("TakerLongShortRatio", market),
+            GetMarketDbPath("TakerLongShortRatio", market, symbol.Name),
             "FuturesCoinTakerLongShortRatios",
             symbol.Name,
             nameof(TakerLongShortRatioCsv.Timestamp),
@@ -278,7 +278,7 @@ internal sealed class SqlServerToDuckDbMigrator(
         string market = "UsdFutures";
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("Kline", market),
+            GetMarketDbPath("Kline", market, symbol.Name),
             "FuturesUsdtBinanceKlines",
             symbol.Name,
             nameof(Kline.CloseTime),
@@ -288,7 +288,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("PremiumIndexKline", market),
+            GetMarketDbPath("PremiumIndexKline", market, symbol.Name),
             "FuturesUsdtBinancePremiumIndexKlines",
             symbol.Name,
             nameof(PremiumIndexKline.CloseTime),
@@ -298,7 +298,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("IndexPriceKline", market),
+            GetMarketDbPath("IndexPriceKline", market, symbol.Name),
             "FuturesUsdtBinanceIndexPriceKlines",
             symbol.Name,
             nameof(PremiumIndexKline.CloseTime),
@@ -308,7 +308,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("MarkPriceKline", market),
+            GetMarketDbPath("MarkPriceKline", market, symbol.Name),
             "FuturesUsdtBinanceMarkPriceKlines",
             symbol.Name,
             nameof(PremiumIndexKline.CloseTime),
@@ -318,7 +318,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("FundingRate", market),
+            GetMarketDbPath("FundingRate", market, symbol.Name),
             "FuturesUsdtFundingRates",
             symbol.Name,
             nameof(FundingRate.FundingTime),
@@ -328,7 +328,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("OpenInterestHistory", market),
+            GetMarketDbPath("OpenInterestHistory", market, symbol.Name),
             "FuturesUsdtOpenInterestHistories",
             symbol.Name,
             nameof(OpenInterestHistory.Timestamp),
@@ -338,7 +338,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("Basis", market),
+            GetMarketDbPath("Basis", market, symbol.Name),
             "FuturesUsdtBasisHistories",
             symbol.Name,
             nameof(FuturesBasisCsv.Timestamp),
@@ -348,7 +348,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("TopLongShortPositionRatio", market),
+            GetMarketDbPath("TopLongShortPositionRatio", market, symbol.Name),
             "FuturesUsdtTopLongShortPositionRatios",
             symbol.Name,
             nameof(LongShortRatioCsv.Timestamp),
@@ -358,7 +358,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("TopLongShortAccountRatio", market),
+            GetMarketDbPath("TopLongShortAccountRatio", market, symbol.Name),
             "FuturesUsdtTopLongShortAccountRatios",
             symbol.Name,
             nameof(LongShortRatioCsv.Timestamp),
@@ -368,7 +368,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("GlobalLongShortAccountRatio", market),
+            GetMarketDbPath("GlobalLongShortAccountRatio", market, symbol.Name),
             "FuturesUsdtGlobalLongShortAccountRatios",
             symbol.Name,
             nameof(LongShortRatioCsv.Timestamp),
@@ -378,7 +378,7 @@ internal sealed class SqlServerToDuckDbMigrator(
             ct);
 
         await MigrateShardedTableAsync(
-            GetMarketDbPath("TakerLongShortRatio", market),
+            GetMarketDbPath("TakerLongShortRatio", market, symbol.Name),
             "FuturesUsdtTakerLongShortRatios",
             symbol.Name,
             nameof(TakerLongShortRatioCsv.Timestamp),
@@ -415,7 +415,7 @@ internal sealed class SqlServerToDuckDbMigrator(
 
         await DuckDbStorageHelper.ReplaceTableAsync(
             duckDbPath,
-            symbolName,
+            SymbolDataTableName,
             finalRows,
             keyColumn,
             recreateTable: false,
@@ -662,8 +662,8 @@ internal sealed class SqlServerToDuckDbMigrator(
     private string GetSymbolInfoDbPath()
         => Path.Combine(options.StorageRootPath, "SymbolInfo.duckdb");
 
-    private string GetMarketDbPath(string dataType, string market)
-        => Path.Combine(options.StorageRootPath, dataType, market + ".duckdb");
+    private string GetMarketDbPath(string dataType, string market, string symbol)
+        => Path.Combine(options.StorageRootPath, dataType, market, symbol + ".duckdb");
 
     private static List<TRecord> DeduplicateAndOrder<TRecord>(IEnumerable<TRecord> rows, Func<TRecord, long> keySelector)
         where TRecord : class
