@@ -489,6 +489,7 @@ internal abstract class StorageController<T>
         logger.LogDebug("Start persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
 
+        string tempSymbolPath = GetMarketDataTempSymbolPath(BaseMarketData.AggTradesDataType, batch.Symbol);
         MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
         bool symbolDbModified = false;
         bool shouldExitEarly = false;
@@ -560,6 +561,7 @@ internal abstract class StorageController<T>
         if (shouldExitEarly)
             return;
 
+        DeleteDirectoryIfExists(tempSymbolPath);
         logger.LogDebug("Finish persisting aggTrades batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
     }
@@ -576,6 +578,7 @@ internal abstract class StorageController<T>
         logger.LogDebug("Start persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
 
+        string tempSymbolPath = GetMarketDataTempSymbolPath(BaseMarketData.BookDepthDataType, batch.Symbol);
         MarketDataDownloadFile[] sortedFiles = [.. batch.Files.OrderBy(GetMarketDataDownloadFileSortKey)];
         bool symbolDbModified = false;
         bool shouldExitEarly = false;
@@ -644,6 +647,7 @@ internal abstract class StorageController<T>
         if (shouldExitEarly)
             return;
 
+        DeleteDirectoryIfExists(tempSymbolPath);
         logger.LogDebug("Finish persisting bookDepth batch. Market: {Market}, Symbol: {Symbol}, FileCount: {FileCount}, DatabasePath: {DatabasePath}",
             batch.MarketPathSegment, batch.Symbol, batch.Files.Count, databasePath);
     }
@@ -1144,6 +1148,12 @@ internal abstract class StorageController<T>
     {
         if (File.Exists(path))
             File.Delete(path);
+    }
+
+    private static void DeleteDirectoryIfExists(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, true);
     }
 
     private static void DeleteDatabaseFileIfExists(string databasePath)
