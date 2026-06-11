@@ -70,7 +70,7 @@ internal static class DuckDbStorageArchiveHelper
                 PreserveDirectoryRoot = false,
                 EventSynchronization = EventSynchronizationStrategy.AlwaysSynchronous
             };
-            SharpSevenZipBase.SetLibraryPath(GetSevenZipLibraryPath());
+            ConfigureSevenZipLibraryPath();
             compressor.FileCompressionStarted += (_, args) =>
             {
                 if (!ct.IsCancellationRequested)
@@ -92,9 +92,12 @@ internal static class DuckDbStorageArchiveHelper
         }, CancellationToken.None);
     }
 
-    private static string GetSevenZipLibraryPath()
+    private static void ConfigureSevenZipLibraryPath()
     {
+        if (!OperatingSystem.IsWindows())
+            return;
+
         string architectureFolder = Environment.Is64BitProcess ? "x64" : "x86";
-        return Path.Combine(BasePath, architectureFolder, "7z.dll");
+        SharpSevenZipBase.SetLibraryPath(Path.Combine(BasePath, architectureFolder, "7z.dll"));
     }
 }
