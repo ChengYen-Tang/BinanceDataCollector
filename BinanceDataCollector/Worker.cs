@@ -6,7 +6,6 @@ namespace BinanceDataCollector;
 
 internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, HangfireJob hangfireJob, ProductionLine productionLine) : IHostedService
 {
-    private readonly CancellationTokenSource cts = new();
     private BackgroundJobServer backgroundJobServer = null!;
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -23,7 +22,7 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
                     MaxExpirationTime = TimeSpan.FromDays(30)
                 });
 
-        RecurringJob.AddOrUpdate("Sync", () => hangfireJob.RunJob(cts.Token), Cron.Daily, new() { TimeZone = TimeZoneInfo.Utc });
+        RecurringJob.AddOrUpdate("Sync", () => hangfireJob.RunJob(CancellationToken.None), Cron.Daily, new() { TimeZone = TimeZoneInfo.Utc });
         RecurringJob.TriggerJob("Sync");
         backgroundJobServer = new BackgroundJobServer();
 
@@ -34,8 +33,8 @@ internal class Worker(ILogger<Worker> logger, IServiceProvider serviceProvider, 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         hangfireJob.RequestStop();
-        cts.Cancel();
         productionLine.Stop();
+        backgroundJobServer.SendStop();
         await hangfireJob.WaitForIdleAsync(CancellationToken.None);
         backgroundJobServer.Dispose();
         await DuckDbStorageHelper.CheckpointDirtyDatabasesAsync(cancellationToken);

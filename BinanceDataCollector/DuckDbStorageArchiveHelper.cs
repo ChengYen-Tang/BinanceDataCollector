@@ -1,12 +1,12 @@
-using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using SharpSevenZip;
 
 namespace BinanceDataCollector;
 
 internal static class DuckDbStorageArchiveHelper
 {
-    public const string ArchiveFileName = "BinanceDataCollector.zip";
+    public const string ArchiveFileName = "BinanceDataCollector.7z";
     private const string HashFileName = ArchiveFileName + ".sha256";
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
 
@@ -58,18 +58,43 @@ internal static class DuckDbStorageArchiveHelper
 
     private static async Task CreateArchiveFromDirectoryAsync(string sourceDirectory, string destinationPath, CancellationToken ct)
     {
-        await using FileStream archiveStream = new(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        using ZipArchive archive = new(archiveStream, ZipArchiveMode.Create);
+        ct.ThrowIfCancellationRequested();
 
-        foreach (string filePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        await Task.Run(() =>
         {
-            ct.ThrowIfCancellationRequested();
+            bool canceled = false;
+            SharpSevenZipCompressor compressor = new()
+            {
+                ArchiveFormat = OutArchiveFormat.SevenZip,
+                DirectoryStructure = true,
+                PreserveDirectoryRoot = false,
+                EventSynchronization = EventSynchronizationStrategy.AlwaysSynchronous
+            };
+            SharpSevenZipBase.SetLibraryPath(GetSevenZipLibraryPath());
+            compressor.FileCompressionStarted += (_, args) =>
+            {
+                if (!ct.IsCancellationRequested)
+                    return;
 
-            string entryName = Path.GetRelativePath(sourceDirectory, filePath).Replace(Path.DirectorySeparatorChar, '/');
-            ZipArchiveEntry entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
-            await using Stream entryStream = entry.Open();
-            await using FileStream sourceStream = File.OpenRead(filePath);
-            await sourceStream.CopyToAsync(entryStream, ct);
-        }
+                args.Cancel = true;
+                canceled = true;
+            };
+            compressor.Compressing += (_, _) =>
+            {
+                if (ct.IsCancellationRequested)
+                    throw new OperationCanceledException(ct);
+            };
+
+            compressor.CompressDirectory(sourceDirectory, destinationPath, string.Empty, "*", true);
+
+            if (canceled || ct.IsCancellationRequested)
+                throw new OperationCanceledException(ct);
+        }, CancellationToken.None);
+    }
+
+    private static string GetSevenZipLibraryPath()
+    {
+        string architectureFolder = Environment.Is64BitProcess ? "x64" : "x86";
+        return Path.Combine(BasePath, architectureFolder, "7z.dll");
     }
 }
