@@ -69,6 +69,11 @@ internal abstract class CollectorController<T> : ICollectorController
         KlineInterval interval = KlineInterval.OneMinute;
         if (ct.IsCancellationRequested)
             return;
+
+        DateTime startTime = await storageController.GetLastTimeAsync(symbol, interval, ct);
+        AsyncWorkItem<T, KlineInterval, DateTime> workItem = new(GatherKlinesAsync, symbol, interval, startTime, ct, BuildWorkItemDescription("Klines", symbol, interval, startTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(workItem, ct);
         DateTime aggTradesStartTime = await storageController.GetLastAggTradesAsync(symbol, ct);
         AsyncWorkItem<T, DateTime> aggTradesWorkItem
             = new(GatherAggTradesAsync, symbol, aggTradesStartTime, ct, BuildWorkItemDescription("AggTrades", symbol, startTime: aggTradesStartTime));
@@ -82,72 +87,55 @@ internal abstract class CollectorController<T> : ICollectorController
         if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
             await productionLine.GatherChannel.Writer.WriteAsync(bookDepthWorkItem, ct);
 
-        // DateTime startTime = await storageController.GetLastTimeAsync(symbol, interval, ct);
-        // AsyncWorkItem<T, KlineInterval, DateTime> workItem = new(GatherKlinesAsync, symbol, interval, startTime, ct, BuildWorkItemDescription("Klines", symbol, interval, startTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(workItem, ct);
-        // DateTime aggTradesStartTime = await storageController.GetLastAggTradesAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> aggTradesWorkItem
-        //     = new(GatherAggTradesAsync, symbol, aggTradesStartTime, ct, BuildWorkItemDescription("AggTrades", symbol, startTime: aggTradesStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(aggTradesWorkItem, ct);
-        // if (!IsFutures)
-        //     return;
-        // DateTime bookDepthStartTime = await storageController.GetLastBookDepthAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> bookDepthWorkItem
-        //     = new(GatherBookDepthAsync, symbol, bookDepthStartTime, ct, BuildWorkItemDescription("BookDepth", symbol, startTime: bookDepthStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(bookDepthWorkItem, ct);
+        DateTime premiumIndexStartTime = await storageController.GetLastPremiumIndexTimeAsync(symbol, interval, ct);
+        AsyncWorkItem<T, KlineInterval, DateTime> premiumIndexWorkItem = new(GatherPremiumIndexKlinesAsync, symbol, interval, premiumIndexStartTime, ct, BuildWorkItemDescription("PremiumIndexKlines", symbol, interval, premiumIndexStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(premiumIndexWorkItem, ct);
 
-        // DateTime premiumIndexStartTime = await storageController.GetLastPremiumIndexTimeAsync(symbol, interval, ct);
-        // AsyncWorkItem<T, KlineInterval, DateTime> premiumIndexWorkItem = new(GatherPremiumIndexKlinesAsync, symbol, interval, premiumIndexStartTime, ct, BuildWorkItemDescription("PremiumIndexKlines", symbol, interval, premiumIndexStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(premiumIndexWorkItem, ct);
+        DateTime indexPriceStartTime = await storageController.GetLastIndexPriceTimeAsync(symbol, interval, ct);
+        AsyncWorkItem<T, KlineInterval, DateTime> indexPriceWorkItem = new(GatherIndexPriceKlinesAsync, symbol, interval, indexPriceStartTime, ct, BuildWorkItemDescription("IndexPriceKlines", symbol, interval, indexPriceStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(indexPriceWorkItem, ct);
 
-        // DateTime indexPriceStartTime = await storageController.GetLastIndexPriceTimeAsync(symbol, interval, ct);
-        // AsyncWorkItem<T, KlineInterval, DateTime> indexPriceWorkItem = new(GatherIndexPriceKlinesAsync, symbol, interval, indexPriceStartTime, ct, BuildWorkItemDescription("IndexPriceKlines", symbol, interval, indexPriceStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(indexPriceWorkItem, ct);
+        DateTime markPriceStartTime = await storageController.GetLastMarkPriceTimeAsync(symbol, interval, ct);
+        AsyncWorkItem<T, KlineInterval, DateTime> markPriceWorkItem = new(GatherMarkPriceKlinesAsync, symbol, interval, markPriceStartTime, ct, BuildWorkItemDescription("MarkPriceKlines", symbol, interval, markPriceStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(markPriceWorkItem, ct);
 
-        // DateTime markPriceStartTime = await storageController.GetLastMarkPriceTimeAsync(symbol, interval, ct);
-        // AsyncWorkItem<T, KlineInterval, DateTime> markPriceWorkItem = new(GatherMarkPriceKlinesAsync, symbol, interval, markPriceStartTime, ct, BuildWorkItemDescription("MarkPriceKlines", symbol, interval, markPriceStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(markPriceWorkItem, ct);
+        DateTime fundingStartTime = await storageController.GetLastFundingTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> fundingWorkItem = new(GatherFundingRatesAsync, symbol, fundingStartTime, ct, BuildWorkItemDescription("FundingRates", symbol, startTime: fundingStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(fundingWorkItem, ct);
 
-        // DateTime fundingStartTime = await storageController.GetLastFundingTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> fundingWorkItem = new(GatherFundingRatesAsync, symbol, fundingStartTime, ct, BuildWorkItemDescription("FundingRates", symbol, startTime: fundingStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(fundingWorkItem, ct);
+        DateTime openInterestStartTime = await storageController.GetLastOpenInterestTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> openInterestWorkItem = new(GatherOpenInterestHistoriesAsync, symbol, openInterestStartTime, ct, BuildWorkItemDescription("OpenInterestHistories", symbol, startTime: openInterestStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(openInterestWorkItem, ct);
 
-        // DateTime openInterestStartTime = await storageController.GetLastOpenInterestTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> openInterestWorkItem = new(GatherOpenInterestHistoriesAsync, symbol, openInterestStartTime, ct, BuildWorkItemDescription("OpenInterestHistories", symbol, startTime: openInterestStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(openInterestWorkItem, ct);
+        DateTime topLongShortPositionStartTime = await storageController.GetLastTopLongShortPositionRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> topLongShortPositionWorkItem = new(GatherTopLongShortPositionRatiosAsync, symbol, topLongShortPositionStartTime, ct, BuildWorkItemDescription("TopLongShortPositionRatios", symbol, startTime: topLongShortPositionStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(topLongShortPositionWorkItem, ct);
 
-        // DateTime topLongShortPositionStartTime = await storageController.GetLastTopLongShortPositionRatioTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> topLongShortPositionWorkItem = new(GatherTopLongShortPositionRatiosAsync, symbol, topLongShortPositionStartTime, ct, BuildWorkItemDescription("TopLongShortPositionRatios", symbol, startTime: topLongShortPositionStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(topLongShortPositionWorkItem, ct);
+        DateTime topLongShortAccountStartTime = await storageController.GetLastTopLongShortAccountRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> topLongShortAccountWorkItem = new(GatherTopLongShortAccountRatiosAsync, symbol, topLongShortAccountStartTime, ct, BuildWorkItemDescription("TopLongShortAccountRatios", symbol, startTime: topLongShortAccountStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(topLongShortAccountWorkItem, ct);
 
-        // DateTime topLongShortAccountStartTime = await storageController.GetLastTopLongShortAccountRatioTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> topLongShortAccountWorkItem = new(GatherTopLongShortAccountRatiosAsync, symbol, topLongShortAccountStartTime, ct, BuildWorkItemDescription("TopLongShortAccountRatios", symbol, startTime: topLongShortAccountStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(topLongShortAccountWorkItem, ct);
+        DateTime globalLongShortAccountStartTime = await storageController.GetLastGlobalLongShortAccountRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> globalLongShortAccountWorkItem = new(GatherGlobalLongShortAccountRatiosAsync, symbol, globalLongShortAccountStartTime, ct, BuildWorkItemDescription("GlobalLongShortAccountRatios", symbol, startTime: globalLongShortAccountStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(globalLongShortAccountWorkItem, ct);
 
-        // DateTime globalLongShortAccountStartTime = await storageController.GetLastGlobalLongShortAccountRatioTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> globalLongShortAccountWorkItem = new(GatherGlobalLongShortAccountRatiosAsync, symbol, globalLongShortAccountStartTime, ct, BuildWorkItemDescription("GlobalLongShortAccountRatios", symbol, startTime: globalLongShortAccountStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(globalLongShortAccountWorkItem, ct);
+        DateTime takerLongShortStartTime = await storageController.GetLastTakerLongShortRatioTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> takerLongShortWorkItem = new(GatherTakerLongShortRatiosAsync, symbol, takerLongShortStartTime, ct, BuildWorkItemDescription("TakerLongShortRatios", symbol, startTime: takerLongShortStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(takerLongShortWorkItem, ct);
 
-        // DateTime takerLongShortStartTime = await storageController.GetLastTakerLongShortRatioTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> takerLongShortWorkItem = new(GatherTakerLongShortRatiosAsync, symbol, takerLongShortStartTime, ct, BuildWorkItemDescription("TakerLongShortRatios", symbol, startTime: takerLongShortStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(takerLongShortWorkItem, ct);
-
-        // DateTime basisStartTime = await storageController.GetLastBasisTimeAsync(symbol, ct);
-        // AsyncWorkItem<T, DateTime> basisWorkItem = new(GatherBasisAsync, symbol, basisStartTime, ct, BuildWorkItemDescription("Basis", symbol, startTime: basisStartTime));
-        // if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
-        //     await productionLine.GatherChannel.Writer.WriteAsync(basisWorkItem, ct);
+        DateTime basisStartTime = await storageController.GetLastBasisTimeAsync(symbol, ct);
+        AsyncWorkItem<T, DateTime> basisWorkItem = new(GatherBasisAsync, symbol, basisStartTime, ct, BuildWorkItemDescription("Basis", symbol, startTime: basisStartTime));
+        if (await productionLine.GatherChannel.Writer.WaitToWriteAsync(ct))
+            await productionLine.GatherChannel.Writer.WriteAsync(basisWorkItem, ct);
     }
 
     private async Task GatherKlinesAsync(T symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
