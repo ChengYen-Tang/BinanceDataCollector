@@ -29,7 +29,7 @@ internal static class DuckDbStorageArchiveHelper
 
         try
         {
-            await CreateArchiveFromDirectoryAsync(StorageRootPath, ArchivePath, ct);
+            await CreateArchiveFromDirectoryAsync(StorageRootPath, ArchivePath, logger, ct);
         }
         catch (OperationCanceledException)
         {
@@ -56,13 +56,15 @@ internal static class DuckDbStorageArchiveHelper
         return Convert.ToHexString(hash);
     }
 
-    private static async Task CreateArchiveFromDirectoryAsync(string sourceDirectory, string destinationPath, CancellationToken ct)
+    private static async Task CreateArchiveFromDirectoryAsync(string sourceDirectory, string destinationPath, ILogger logger, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         await Task.Run(() =>
         {
             bool canceled = false;
+            byte lastLoggedPercent = 0;
+            string? currentFile = null;
             SharpSevenZipCompressor compressor = new()
             {
                 ArchiveFormat = OutArchiveFormat.SevenZip,
@@ -73,19 +75,39 @@ internal static class DuckDbStorageArchiveHelper
             ConfigureSevenZipLibraryPath();
             compressor.FileCompressionStarted += (_, args) =>
             {
+                currentFile = args.FileName;
+
                 if (!ct.IsCancellationRequested)
                     return;
 
                 args.Cancel = true;
                 canceled = true;
             };
-            compressor.Compressing += (_, _) =>
+            compressor.Compressing += (_, args) =>
             {
                 if (ct.IsCancellationRequested)
                     throw new OperationCanceledException(ct);
+
+                byte progress = args.PercentDone;
+                byte nextThreshold = (byte)(progress / 5 * 5);
+                if (nextThreshold <= lastLoggedPercent || nextThreshold == 0)
+                    return;
+
+                lastLoggedPercent = nextThreshold;
+                logger.LogInformation(
+                    "Packaging DuckDB archive progress: {Progress}%. Current file: {CurrentFile}",
+                    nextThreshold,
+                    currentFile ?? "<unknown>");
             };
 
             compressor.CompressDirectory(sourceDirectory, destinationPath, string.Empty, "*", true);
+
+            if (lastLoggedPercent < 100)
+            {
+                logger.LogInformation(
+                    "Packaging DuckDB archive progress: 100%. Current file: {CurrentFile}",
+                    currentFile ?? "<completed>");
+            }
 
             if (canceled || ct.IsCancellationRequested)
                 throw new OperationCanceledException(ct);
