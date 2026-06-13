@@ -1,12 +1,12 @@
-using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using SharpSevenZip;
 
 namespace BinanceDataCollector;
 
 internal static class DuckDbStorageArchiveHelper
 {
-    public const string ArchiveFileName = "BinanceDataCollector.zip";
+    public const string ArchiveFileName = "BinanceDataCollector.7z";
     private const string HashFileName = ArchiveFileName + ".sha256";
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
 
@@ -29,7 +29,7 @@ internal static class DuckDbStorageArchiveHelper
 
         try
         {
-            await CreateArchiveFromDirectoryAsync(StorageRootPath, ArchivePath, ct);
+            await CreateArchiveFromDirectoryAsync(StorageRootPath, ArchivePath, logger, ct);
         }
         catch (OperationCanceledException)
         {
@@ -56,20 +56,70 @@ internal static class DuckDbStorageArchiveHelper
         return Convert.ToHexString(hash);
     }
 
-    private static async Task CreateArchiveFromDirectoryAsync(string sourceDirectory, string destinationPath, CancellationToken ct)
+    private static async Task CreateArchiveFromDirectoryAsync(string sourceDirectory, string destinationPath, ILogger logger, CancellationToken ct)
     {
-        await using FileStream archiveStream = new(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        using ZipArchive archive = new(archiveStream, ZipArchiveMode.Create);
+        ct.ThrowIfCancellationRequested();
 
-        foreach (string filePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        await Task.Run(() =>
         {
-            ct.ThrowIfCancellationRequested();
+            bool canceled = false;
+            byte lastLoggedPercent = 0;
+            string? currentFile = null;
+            SharpSevenZipCompressor compressor = new()
+            {
+                ArchiveFormat = OutArchiveFormat.SevenZip,
+                DirectoryStructure = true,
+                PreserveDirectoryRoot = false,
+                EventSynchronization = EventSynchronizationStrategy.AlwaysSynchronous
+            };
+            ConfigureSevenZipLibraryPath();
+            compressor.FileCompressionStarted += (_, args) =>
+            {
+                currentFile = args.FileName;
 
-            string entryName = Path.GetRelativePath(sourceDirectory, filePath).Replace(Path.DirectorySeparatorChar, '/');
-            ZipArchiveEntry entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
-            await using Stream entryStream = entry.Open();
-            await using FileStream sourceStream = File.OpenRead(filePath);
-            await sourceStream.CopyToAsync(entryStream, ct);
-        }
+                if (!ct.IsCancellationRequested)
+                    return;
+
+                args.Cancel = true;
+                canceled = true;
+            };
+            compressor.Compressing += (_, args) =>
+            {
+                if (ct.IsCancellationRequested)
+                    throw new OperationCanceledException(ct);
+
+                byte progress = args.PercentDone;
+                byte nextThreshold = (byte)(progress / 5 * 5);
+                if (nextThreshold <= lastLoggedPercent || nextThreshold == 0)
+                    return;
+
+                lastLoggedPercent = nextThreshold;
+                logger.LogInformation(
+                    "Packaging DuckDB archive progress: {Progress}%. Current file: {CurrentFile}",
+                    nextThreshold,
+                    currentFile ?? "<unknown>");
+            };
+
+            compressor.CompressDirectory(sourceDirectory, destinationPath, string.Empty, "*", true);
+
+            if (lastLoggedPercent < 100)
+            {
+                logger.LogInformation(
+                    "Packaging DuckDB archive progress: 100%. Current file: {CurrentFile}",
+                    currentFile ?? "<completed>");
+            }
+
+            if (canceled || ct.IsCancellationRequested)
+                throw new OperationCanceledException(ct);
+        }, CancellationToken.None);
+    }
+
+    private static void ConfigureSevenZipLibraryPath()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        string architectureFolder = Environment.Is64BitProcess ? "x64" : "x86";
+        SharpSevenZipBase.SetLibraryPath(Path.Combine(BasePath, architectureFolder, "7z.dll"));
     }
 }

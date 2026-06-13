@@ -1090,6 +1090,40 @@ public sealed class DuckDbStorageHelperTests
     }
 
     [TestMethod]
+    public async Task AppendAggTradesFromCsvAsync_WhenDatabaseDoesNotExist_CreatesFileAndImportsRows()
+    {
+        string dbPath = CreateMarketDataDbPath("aggTrades");
+        string csvPath = Path.Combine(tempDirectory, "aggTrades-first-write.csv");
+
+        WriteAggTradesCsv(csvPath, totalRows: 3, AggTradesCsvSchema.Futures, includeHeader: true);
+
+        await DuckDbStorageHelper.AppendAggTradesFromCsvAsync(
+            dbPath,
+            "BTCUSDT",
+            csvPath,
+            AggTradesCsvSchema.Futures,
+            sourceIsMicroseconds: false,
+            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+
+        Assert.IsTrue(File.Exists(dbPath));
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(parquetagg_trade_id), MAX(parquetagg_trade_id), MAX(transact_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(3L, reader.GetInt64(0));
+        Assert.AreEqual(1L, reader.GetInt64(1));
+        Assert.AreEqual(3L, reader.GetInt64(2));
+        Assert.AreEqual(3_000_000L, reader.GetInt64(3));
+    }
+
+    [TestMethod]
     public async Task ReplaceBookDepthTailFromCsvAsync_WhenFinalBatchIsPartial_DoesNotPersistStaleRows()
     {
         string dbPath = CreateDbPath();
@@ -1140,8 +1174,42 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
     }
 
+    [TestMethod]
+    public async Task ReplaceBookDepthTailFromCsvAsync_WhenDatabaseDoesNotExist_CreatesFileAndImportsRows()
+    {
+        string dbPath = CreateMarketDataDbPath("bookDepth");
+        string csvPath = Path.Combine(tempDirectory, "bookDepth-first-write.csv");
+
+        WriteBookDepthCsv(csvPath, totalRows: 3, includeHeader: true);
+
+        await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(
+            dbPath,
+            "BTCUSDT",
+            csvPath,
+            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+
+        Assert.IsTrue(File.Exists(dbPath));
+
+        await using DuckDBConnection connection = new($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*), MIN(snapshot_time), MAX(snapshot_time)
+            FROM BTCUSDT;
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.IsTrue(await reader.ReadAsync());
+        Assert.AreEqual(3L, reader.GetInt64(0));
+        Assert.AreEqual(1_735_689_600_000L, reader.GetInt64(1));
+        Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
+    }
+
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
+
+    private string CreateMarketDataDbPath(string dataType)
+        => Path.Combine(tempDirectory, dataType, "storage.duckdb");
 
     private static Kline CreateKline(long openTime, long closeTime, double closePrice)
         => new()

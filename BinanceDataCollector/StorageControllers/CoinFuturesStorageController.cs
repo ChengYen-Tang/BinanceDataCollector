@@ -19,17 +19,17 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
 
     protected override string MarketPathSegment => Market;
     protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "SymbolInfo.duckdb"); } }
-    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market + ".duckdb"); } }
-    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, Market + ".duckdb"); } }
-    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, Market + ".duckdb"); } }
-    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, Market + ".duckdb"); } }
-    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, Market + ".duckdb"); } }
-    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, Market + ".duckdb"); } }
-    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, Market + ".duckdb"); } }
-    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, Market + ".duckdb"); } }
-    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, Market + ".duckdb"); } }
-    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market + ".duckdb"); } }
-    protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market + ".duckdb"); } }
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market); } }
+    protected override string PremiumIndexKlinePath { get { return Path.Combine(RootPremiumIndexKlinePath, Market); } }
+    protected override string IndexPriceKlinePath { get { return Path.Combine(RootIndexPriceKlinePath, Market); } }
+    protected override string MarkPriceKlinePath { get { return Path.Combine(RootMarkPriceKlinePath, Market); } }
+    protected override string FundingRatePath { get { return Path.Combine(RootFundingRatePath, Market); } }
+    protected override string OpenInterestPath { get { return Path.Combine(RootOpenInterestPath, Market); } }
+    protected override string TopLongShortPositionRatioPath { get { return Path.Combine(RootTopLongShortPositionRatioPath, Market); } }
+    protected override string TopLongShortAccountRatioPath { get { return Path.Combine(RootTopLongShortAccountRatioPath, Market); } }
+    protected override string GlobalLongShortAccountRatioPath { get { return Path.Combine(RootGlobalLongShortAccountRatioPath, Market); } }
+    protected override string TakerLongShortRatioPath { get { return Path.Combine(RootTakerLongShortRatioPath, Market); } }
+    protected override string BasisPath { get { return Path.Combine(RootBasisPath, Market); } }
     protected override bool IsFutures => true;
     protected override AggTradesTimeUnit AggTradesTimeUnit => AggTradesTimeUnit.Milliseconds;
     protected override string GetSymbolName(SymbolInfoCsv symbol)
@@ -40,7 +40,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
 
     protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        await DeleteSymbolTablesAsync(
+        await DeleteSymbolDatabasesAsync(
         [
             KlinePath,
             PremiumIndexKlinePath,

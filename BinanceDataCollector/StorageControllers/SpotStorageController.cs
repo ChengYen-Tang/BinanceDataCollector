@@ -19,7 +19,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
 
     protected override string MarketPathSegment => Market;
     protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "SymbolInfo.duckdb"); } }
-    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market + ".duckdb"); } }
+    protected override string KlinePath { get { return Path.Combine(RootKlinePath, Market); } }
     protected override string PremiumIndexKlinePath => throw new NotImplementedException();
     protected override string IndexPriceKlinePath => throw new NotSupportedException("Spot market does not support index price klines.");
     protected override string MarkPriceKlinePath => throw new NotSupportedException("Spot market does not support mark price klines.");
@@ -45,7 +45,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
 
     protected override async Task DeleteDelistedSymbolsAsync(IReadOnlyCollection<string> currentSymbols, IReadOnlyCollection<string> delistedSymbols, CancellationToken ct = default)
     {
-        await DeleteSymbolTablesAsync([KlinePath], currentSymbols, ct);
+        await DeleteSymbolDatabasesAsync([KlinePath], currentSymbols, ct);
         await DeleteAggTradesStorageAsync(currentSymbols, delistedSymbols, ct);
     }
 

@@ -50,16 +50,29 @@ public sealed class MarketDataIntegrityChecker(
             return;
         }
 
-        foreach (string databasePath in Directory.EnumerateFiles(dataTypeFolder, "*.duckdb", SearchOption.TopDirectoryOnly).Order(StringComparer.OrdinalIgnoreCase))
+        string[] databasePaths = Directory
+            .EnumerateFiles(dataTypeFolder, "*.duckdb", SearchOption.AllDirectories)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        ParallelOptions parallelOptions = new()
         {
-            ct.ThrowIfCancellationRequested();
-            summary.DatabaseCount++;
-            CheckDatabase(databasePath, profile, summary, ct);
-        }
+            CancellationToken = ct,
+            MaxDegreeOfParallelism = Math.Max(1, options.MaxDegreeOfParallelism)
+        };
+
+        Parallel.ForEach(databasePaths, parallelOptions, databasePath =>
+        {
+            CheckSummary databaseSummary = CheckDatabase(databasePath, profile, ct);
+            summary.Merge(databaseSummary);
+        });
     }
 
-    private void CheckDatabase(string databasePath, DataTypeProfile profile, CheckSummary summary, CancellationToken ct)
+    private CheckSummary CheckDatabase(string databasePath, DataTypeProfile profile, CancellationToken ct)
     {
+        CheckSummary summary = new();
+        summary.AddDatabase();
+
         try
         {
             using DuckDBConnection connection = new($"Data Source={databasePath}");
@@ -68,7 +81,6 @@ public sealed class MarketDataIntegrityChecker(
             foreach (string tableName in GetTableNames(connection))
             {
                 ct.ThrowIfCancellationRequested();
-                summary.TableCount++;
                 CheckTable(connection, databasePath, tableName, profile, summary);
             }
         }
@@ -76,6 +88,8 @@ public sealed class MarketDataIntegrityChecker(
         {
             logger.LogError(ex, "Failed to check DuckDB file. DataType: {DataType}, DatabasePath: {DatabasePath}", profile.DataType, databasePath);
         }
+
+        return summary;
     }
 
     private void CheckTable(
@@ -85,6 +99,7 @@ public sealed class MarketDataIntegrityChecker(
         DataTypeProfile profile,
         CheckSummary summary)
     {
+        summary.AddTable();
         bool hasIssue = false;
 
         try
@@ -97,7 +112,7 @@ public sealed class MarketDataIntegrityChecker(
                     profile.DataType,
                     databasePath,
                     tableName);
-                summary.TablesWithIssues++;
+                summary.AddTableWithIssue();
                 return;
             }
 
@@ -105,7 +120,7 @@ public sealed class MarketDataIntegrityChecker(
             if (invalidRows > 0)
             {
                 hasIssue = true;
-                summary.InvalidRows += invalidRows;
+                summary.AddInvalidRows(invalidRows);
                 logger.LogWarning(
                     "DuckDB table contains invalid rows. DataType: {DataType}, DatabasePath: {DatabasePath}, Table: {Table}, InvalidRows: {InvalidRows}",
                     profile.DataType,
@@ -117,7 +132,7 @@ public sealed class MarketDataIntegrityChecker(
             foreach (string columnName in GetAllZeroColumns(connection, tableName, profile))
             {
                 hasIssue = true;
-                summary.AllZeroColumns++;
+                summary.AddAllZeroColumn();
                 logger.LogWarning(
                     "DuckDB table numeric column contains only zero values. DataType: {DataType}, DatabasePath: {DatabasePath}, Table: {Table}, Column: {Column}, RowCount: {RowCount}",
                     profile.DataType,
@@ -131,7 +146,7 @@ public sealed class MarketDataIntegrityChecker(
             if (missingDays.Count > 0)
             {
                 hasIssue = true;
-                summary.MissingDays += missingDays.Count;
+                summary.AddMissingDays(missingDays.Count);
                 logger.LogWarning(
                     "DuckDB table has missing UTC days. DataType: {DataType}, DatabasePath: {DatabasePath}, Table: {Table}, MissingDayCount: {MissingDayCount}, MissingDaysSample: {MissingDaysSample}",
                     profile.DataType,
@@ -142,11 +157,11 @@ public sealed class MarketDataIntegrityChecker(
             }
 
             if (hasIssue)
-                summary.TablesWithIssues++;
+                summary.AddTableWithIssue();
         }
         catch (Exception ex)
         {
-            summary.FailedTables++;
+            summary.AddFailedTable();
             logger.LogError(
                 ex,
                 "Failed to check DuckDB table. DataType: {DataType}, DatabasePath: {DatabasePath}, Table: {Table}",
@@ -324,18 +339,61 @@ public sealed class MarketDataIntegrityChecker(
 
     private sealed class CheckSummary
     {
-        public int DatabaseCount { get; set; }
+        private int databaseCount;
+        private int tableCount;
+        private int tablesWithIssues;
+        private long missingDays;
+        private long invalidRows;
+        private int allZeroColumns;
+        private int failedTables;
 
-        public int TableCount { get; set; }
+        public int DatabaseCount => databaseCount;
 
-        public int TablesWithIssues { get; set; }
+        public int TableCount => tableCount;
 
-        public long MissingDays { get; set; }
+        public int TablesWithIssues => tablesWithIssues;
 
-        public long InvalidRows { get; set; }
+        public long MissingDays => missingDays;
 
-        public int AllZeroColumns { get; set; }
+        public long InvalidRows => invalidRows;
 
-        public int FailedTables { get; set; }
+        public int AllZeroColumns => allZeroColumns;
+
+        public int FailedTables => failedTables;
+
+        public void AddDatabase() => Interlocked.Increment(ref databaseCount);
+
+        public void AddTable() => Interlocked.Increment(ref tableCount);
+
+        public void AddTableWithIssue() => Interlocked.Increment(ref tablesWithIssues);
+
+        public void AddMissingDays(long count) => Interlocked.Add(ref missingDays, count);
+
+        public void AddInvalidRows(long count) => Interlocked.Add(ref invalidRows, count);
+
+        public void AddAllZeroColumn() => Interlocked.Increment(ref allZeroColumns);
+
+        public void AddFailedTable() => Interlocked.Increment(ref failedTables);
+
+        public void Merge(CheckSummary other)
+        {
+            AddDatabaseCount(other.DatabaseCount);
+            AddTableCount(other.TableCount);
+            AddTablesWithIssues(other.TablesWithIssues);
+            AddMissingDays(other.MissingDays);
+            AddInvalidRows(other.InvalidRows);
+            AddAllZeroColumns(other.AllZeroColumns);
+            AddFailedTables(other.FailedTables);
+        }
+
+        private void AddDatabaseCount(int count) => Interlocked.Add(ref databaseCount, count);
+
+        private void AddTableCount(int count) => Interlocked.Add(ref tableCount, count);
+
+        private void AddTablesWithIssues(int count) => Interlocked.Add(ref tablesWithIssues, count);
+
+        private void AddAllZeroColumns(int count) => Interlocked.Add(ref allZeroColumns, count);
+
+        private void AddFailedTables(int count) => Interlocked.Add(ref failedTables, count);
     }
 }
