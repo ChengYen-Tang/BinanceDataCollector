@@ -145,18 +145,28 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
 
     public override async Task<Result<IEnumerable<BinanceFuturesCoinSymbol>>> GetMarketAsync(CancellationToken ct = default)
     {
-        WebCallResult<BinanceFuturesCoinExchangeInfo> result;
-        try
+        while (true)
         {
-            result = await base.client.CoinFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+            WebCallResult<BinanceFuturesCoinExchangeInfo> result;
+            try
+            {
+                result = await base.client.CoinFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                return Result.Fail(ex.Message);
+            }
+            if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
+                return Result.Fail(result.Error!.Message);
+            }
+            return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Any(ic => x.Name.Contains(ic) && !x.Name.Contains("1000") && !x.Name.Contains('_')) && x.UnderlyingType == UnderlyingType.Coin && x.ContractType == ContractType.Perpetual && x.Status == SymbolStatus.Trading));
         }
-        catch (Exception ex)
-        {
-            return Result.Fail(ex.Message);
-        }
-        if (!result.Success)
-            return Result.Fail(result.Error!.Message);
-        return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Any(ic => x.Name.Contains(ic) && !x.Name.Contains("1000") && !x.Name.Contains('_')) && x.UnderlyingType == UnderlyingType.Coin && x.ContractType == ContractType.Perpetual && x.Status == SymbolStatus.Trading));
     }
 
     public async Task<Result<List<BinanceFuturesFundingRateHistory>>> GetFundingRatesAsync(string symbol, DateTime startTime, CancellationToken ct = default)

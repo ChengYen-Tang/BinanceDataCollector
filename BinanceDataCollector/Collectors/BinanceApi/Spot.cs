@@ -51,18 +51,28 @@ namespace BinanceDataCollector.Collectors.BinanceApi
 
         public override async Task<Result<IEnumerable<BinanceSymbol>>> GetMarketAsync(CancellationToken ct = default)
         {
-            WebCallResult<BinanceExchangeInfo> result;
-            try
+            while (true)
             {
-                result = await base.client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct: ct);
+                WebCallResult<BinanceExchangeInfo> result;
+                try
+                {
+                    result = await base.client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct: ct);
+                }
+                catch (Exception ex)
+                {
+                    return Result.Fail(ex.Message);
+                }
+                if (!result.Success)
+                {
+                    if (IsRateLimitError(result.Error))
+                    {
+                        await Task.Delay(RateLimitRetryDelay, ct);
+                        continue;
+                    }
+                    return Result.Fail(result.Error!.Message);
+                }
+                return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Any(ic => x.Name.Contains(ic)) && !x.Name.Contains("1000") && !x.Name.Contains('_') && x.Status == SymbolStatus.Trading));
             }
-            catch (Exception ex)
-            {
-                return Result.Fail(ex.Message);
-            }
-            if (!result.Success)
-                return Result.Fail(result.Error!.Message);
-            return Result.Ok(result.Data.Symbols.Where(x => !ignoneCoins.Any(ic => x.Name.Contains(ic)) && !x.Name.Contains("1000") && !x.Name.Contains('_') && x.Status == SymbolStatus.Trading));
         }
     }
 }
