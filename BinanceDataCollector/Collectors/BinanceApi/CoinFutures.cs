@@ -1,4 +1,4 @@
-﻿using Binance.Net.Interfaces.Clients;
+using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Futures;
 using Binance.Net.Objects.Models.Spot;
 using ApiKline = Binance.Net.Interfaces.IBinanceKline;
@@ -26,7 +26,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             ApiKline[] validData = [.. result.Data.Where(item => item.CloseTime >= cursor)];
             cursor = validData.Length != 0 ? GetNextKlineStartTime(cursor, validData.Last().CloseTime, interval) : cursor.AddDays(200);
             klines.AddRange(validData);
@@ -53,7 +60,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceMarkIndexKline[] validData = [.. result.Data.Where(item => item.CloseTime >= cursor)];
             cursor = validData.Length != 0 ? GetNextKlineStartTime(cursor, validData.Last().CloseTime, interval) : cursor.AddDays(200);
             klines.AddRange(validData);
@@ -80,7 +94,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceMarkIndexKline[] validData = [.. result.Data.Where(item => item.CloseTime >= cursor)];
             cursor = validData.Length != 0 ? GetNextKlineStartTime(cursor, validData.Last().CloseTime, interval) : cursor.AddDays(200);
             klines.AddRange(validData);
@@ -107,7 +128,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceMarkIndexKline[] validData = [.. result.Data.Where(item => item.CloseTime >= cursor)];
             cursor = validData.Length != 0 ? GetNextKlineStartTime(cursor, validData.Last().CloseTime, interval) : cursor.AddDays(200);
             klines.AddRange(validData);
@@ -150,7 +178,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesFundingRateHistory[] validData = [.. result.Data.Where(item => item.FundingTime >= cursor)];
             cursor = validData.Length != 0 ? GetNextFundingRateStartTime(cursor, validData.Last().FundingTime) : cursor.AddDays(200);
             fundingRates.AddRange(validData);
@@ -177,7 +212,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesCoinOpenInterestHistory[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
             cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             openInterestHistories.AddRange(validData);
@@ -205,7 +247,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesBasis[] validData = [.. result.Data.Where(item => item.Timestamp != default && item.Timestamp >= cursor)];
             cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp) : cursor.AddDays(200);
             basis.AddRange(validData);
@@ -233,7 +282,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
             cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
@@ -260,7 +316,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
             cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
@@ -287,7 +350,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesLongShortRatio[] validData = [.. result.Data.Where(item => item.Timestamp.HasValue && item.Timestamp.Value >= cursor)];
             cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp!.Value) : cursor.AddDays(200);
             ratios.AddRange(validData);
@@ -314,7 +384,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins) : Ba
                 return Result.Fail(ex.Message);
             }
             if (!result.Success)
+            {
+                if (IsRateLimitError(result.Error))
+                {
+                    await Task.Delay(RateLimitRetryDelay, ct);
+                    continue;
+                }
                 return Result.Fail(result.Error!.Message);
+            }
             BinanceFuturesCoinBuySellVolumeRatio[] validData = [.. result.Data.Where(item => item.Timestamp != default && item.Timestamp >= cursor)];
             cursor = validData.Length != 0 ? GetNextRestrictedStartTime(cursor, validData.Last().Timestamp) : cursor.AddDays(200);
             ratios.AddRange(validData);

@@ -1,4 +1,4 @@
-﻿using Binance.Net.Interfaces.Clients;
+using Binance.Net.Interfaces.Clients;
 using Binance.Net.Objects.Models.Spot;
 using ApiKline = Binance.Net.Interfaces.IBinanceKline;
 
@@ -25,7 +25,14 @@ namespace BinanceDataCollector.Collectors.BinanceApi
                     return Result.Fail(ex.Message);
                 }
                 if (!result.Success)
+                {
+                    if (IsRateLimitError(result.Error))
+                    {
+                        await Task.Delay(RateLimitRetryDelay, ct);
+                        continue;
+                    }
                     return Result.Fail(result.Error!.Message);
+                }
                 ApiKline[] validData = [.. result.Data!.Where(item => item.CloseTime >= cursor)];
                 cursor = validData.Length != 0 ? GetNextKlineStartTime(cursor, validData.Last().CloseTime, interval) : cursor.AddDays(200);
                 klines.AddRange(validData);

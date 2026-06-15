@@ -5,6 +5,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi;
 
 internal abstract class BaseTrade<T>(IBinanceRestClient client)
 {
+    protected static readonly TimeSpan RateLimitRetryDelay = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan MaxRestrictedApiLookback = TimeSpan.FromDays(29);
     private static readonly TimeSpan RestrictedApiPageWindow = TimeSpan.FromMinutes(499 * 5);
     private static readonly TimeSpan RestrictedApiEndTimePadding = TimeSpan.FromMinutes(5);
@@ -69,6 +70,11 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
             KlineInterval.OneMonth => TimeSpan.FromDays(31),
             _ => throw new ArgumentOutOfRangeException(nameof(interval), interval, "Unsupported kline interval.")
         };
+
+    protected static bool IsRateLimitError(CryptoExchange.Net.Objects.Error? error)
+        => error is Binance.Net.Objects.BinanceRateLimitError
+            or ServerRateLimitError
+            || error?.ErrorType == CryptoExchange.Net.Objects.Errors.ErrorType.RateLimitRequest;
 
     public abstract Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     public abstract Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
