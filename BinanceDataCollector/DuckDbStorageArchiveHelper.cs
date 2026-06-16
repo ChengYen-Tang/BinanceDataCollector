@@ -8,6 +8,7 @@ internal static class DuckDbStorageArchiveHelper
 {
     public const string ArchiveFileName = "BinanceDataCollector.7z";
     private const string HashFileName = ArchiveFileName + ".sha256";
+    private const long ArchiveVolumeSizeBytes = 200L * 1024 * 1024 * 1024;
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
 
     public static string StorageRootPath { get; } = Path.Combine(BasePath, "DataStorage");
@@ -24,7 +25,7 @@ internal static class DuckDbStorageArchiveHelper
             return false;
         }
 
-        DeleteFileIfExists(ArchivePath);
+        DeleteArchiveFiles();
         DeleteFileIfExists(HashPath);
 
         try
@@ -33,13 +34,18 @@ internal static class DuckDbStorageArchiveHelper
         }
         catch (OperationCanceledException)
         {
-            DeleteFileIfExists(ArchivePath);
+            DeleteArchiveFiles();
             DeleteFileIfExists(HashPath);
             throw;
         }
 
-        string hashText = await ComputeSha256Async(ArchivePath, ct);
-        await File.WriteAllTextAsync(HashPath, $"{hashText} *{ArchiveFileName}", Encoding.ASCII, ct);
+        string[] archiveFiles = GetArchiveFiles();
+        string[] hashLines = await Task.WhenAll(archiveFiles.Select(async path =>
+        {
+            string hashText = await ComputeSha256Async(path, ct);
+            return $"{hashText} *{Path.GetFileName(path)}";
+        }));
+        await File.WriteAllLinesAsync(HashPath, hashLines, Encoding.ASCII, ct);
         return true;
     }
 
@@ -68,14 +74,17 @@ internal static class DuckDbStorageArchiveHelper
             SharpSevenZipCompressor compressor = new()
             {
                 ArchiveFormat = OutArchiveFormat.SevenZip,
+                CompressionLevel = CompressionLevel.Fast,
                 DirectoryStructure = true,
                 PreserveDirectoryRoot = false,
-                EventSynchronization = EventSynchronizationStrategy.AlwaysSynchronous
+                EventSynchronization = EventSynchronizationStrategy.AlwaysSynchronous,
+                VolumeSize = ArchiveVolumeSizeBytes
             };
             ConfigureSevenZipLibraryPath();
             compressor.FileCompressionStarted += (_, args) =>
             {
-                currentFile = args.FileName;
+                currentFile = Path.GetRelativePath(sourceDirectory, args.FileName)
+                    .Replace(Path.DirectorySeparatorChar, '/');
 
                 if (!ct.IsCancellationRequested)
                     return;
@@ -112,6 +121,24 @@ internal static class DuckDbStorageArchiveHelper
             if (canceled || ct.IsCancellationRequested)
                 throw new OperationCanceledException(ct);
         }, CancellationToken.None);
+    }
+
+    private static void DeleteArchiveFiles()
+    {
+        foreach (string path in GetArchiveFiles())
+            DeleteFileIfExists(path);
+    }
+
+    private static string[] GetArchiveFiles()
+    {
+        if (!Directory.Exists(DataPath))
+            return [];
+
+        return Directory
+            .EnumerateFiles(DataPath, ArchiveFileName + "*", SearchOption.TopDirectoryOnly)
+            .Where(path => !string.Equals(Path.GetFileName(path), HashFileName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static void ConfigureSevenZipLibraryPath()
