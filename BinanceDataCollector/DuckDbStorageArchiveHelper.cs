@@ -8,13 +8,12 @@ internal static class DuckDbStorageArchiveHelper
 {
     public const string ArchiveFileName = "BinanceDataCollector.7z";
     private const string HashFileName = ArchiveFileName + ".sha256";
-    private const long ArchiveVolumeSizeBytes = 200L * 1024 * 1024 * 1024;
+    private const long ArchiveVolumeSizeBytes = 100L * 1024 * 1024 * 1024;
+    private const string BuildingDirectorySuffix = ".building";
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
 
     public static string StorageRootPath { get; } = Path.Combine(BasePath, "DataStorage");
     public static string DataPath { get; } = Path.Combine(BasePath, "Data");
-    public static string ArchivePath { get; } = Path.Combine(DataPath, ArchiveFileName);
-    public static string HashPath { get; } = Path.Combine(DataPath, HashFileName);
 
     public static async Task<bool> FinalizeArchiveAsync(ILogger logger, CancellationToken ct = default)
     {
@@ -25,27 +24,36 @@ internal static class DuckDbStorageArchiveHelper
             return false;
         }
 
-        DeleteArchiveFiles();
-        DeleteFileIfExists(HashPath);
+        string? latestCompletedDirectoryPath = GetLatestCompletedArchiveDirectory();
+        string finalDirectoryPath = CreateArchiveDirectoryPath(DateTimeOffset.Now);
+        string buildingDirectoryPath = finalDirectoryPath + BuildingDirectorySuffix;
+        string archivePath = Path.Combine(buildingDirectoryPath, ArchiveFileName);
+        string hashPath = Path.Combine(buildingDirectoryPath, HashFileName);
+
+        CleanupArchiveDirectories(latestCompletedDirectoryPath, buildingDirectoryPath);
+        DeleteDirectoryIfExists(buildingDirectoryPath);
+        Directory.CreateDirectory(buildingDirectoryPath);
 
         try
         {
-            await CreateArchiveFromDirectoryAsync(StorageRootPath, ArchivePath, logger, ct);
+            await CreateArchiveFromDirectoryAsync(StorageRootPath, archivePath, logger, ct);
         }
         catch (OperationCanceledException)
         {
-            DeleteArchiveFiles();
-            DeleteFileIfExists(HashPath);
+            DeleteDirectoryIfExists(buildingDirectoryPath);
             throw;
         }
 
-        string[] archiveFiles = GetArchiveFiles();
+        string[] archiveFiles = GetArchiveFiles(buildingDirectoryPath);
         string[] hashLines = await Task.WhenAll(archiveFiles.Select(async path =>
         {
             string hashText = await ComputeSha256Async(path, ct);
             return $"{hashText} *{Path.GetFileName(path)}";
         }));
-        await File.WriteAllLinesAsync(HashPath, hashLines, Encoding.ASCII, ct);
+        await File.WriteAllLinesAsync(hashPath, hashLines, Encoding.ASCII, ct);
+
+        Directory.Move(buildingDirectoryPath, finalDirectoryPath);
+        CleanupArchiveDirectories(finalDirectoryPath, null);
         return true;
     }
 
@@ -53,6 +61,12 @@ internal static class DuckDbStorageArchiveHelper
     {
         if (File.Exists(path))
             File.Delete(path);
+    }
+
+    private static void DeleteDirectoryIfExists(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, true);
     }
 
     private static async Task<string> ComputeSha256Async(string path, CancellationToken ct)
@@ -74,7 +88,7 @@ internal static class DuckDbStorageArchiveHelper
             SharpSevenZipCompressor compressor = new()
             {
                 ArchiveFormat = OutArchiveFormat.SevenZip,
-                CompressionLevel = CompressionLevel.Fast,
+                CompressionLevel = CompressionLevel.Low,
                 DirectoryStructure = true,
                 PreserveDirectoryRoot = false,
                 EventSynchronization = EventSynchronizationStrategy.AlwaysSynchronous,
@@ -123,22 +137,59 @@ internal static class DuckDbStorageArchiveHelper
         }, CancellationToken.None);
     }
 
-    private static void DeleteArchiveFiles()
+    private static string CreateArchiveDirectoryPath(DateTimeOffset timestamp)
     {
-        foreach (string path in GetArchiveFiles())
-            DeleteFileIfExists(path);
+        string directoryName = timestamp.ToString("yyyyMMdd-HHmm");
+        string directoryPath = Path.Combine(DataPath, directoryName);
+        if (!Directory.Exists(directoryPath) && !Directory.Exists(directoryPath + BuildingDirectorySuffix))
+            return directoryPath;
+
+        for (int suffix = 1; ; suffix++)
+        {
+            string candidatePath = Path.Combine(DataPath, $"{directoryName}-{suffix:D2}");
+            if (Directory.Exists(candidatePath) || Directory.Exists(candidatePath + BuildingDirectorySuffix))
+                continue;
+
+            return candidatePath;
+        }
     }
 
-    private static string[] GetArchiveFiles()
+    private static string[] GetArchiveFiles(string directoryPath)
     {
-        if (!Directory.Exists(DataPath))
+        if (!Directory.Exists(directoryPath))
             return [];
 
         return Directory
-            .EnumerateFiles(DataPath, ArchiveFileName + "*", SearchOption.TopDirectoryOnly)
+            .EnumerateFiles(directoryPath, ArchiveFileName + "*", SearchOption.TopDirectoryOnly)
             .Where(path => !string.Equals(Path.GetFileName(path), HashFileName, StringComparison.OrdinalIgnoreCase))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static string? GetLatestCompletedArchiveDirectory()
+    {
+        return Directory
+            .EnumerateDirectories(DataPath, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => !Path.GetFileName(path).EndsWith(BuildingDirectorySuffix, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static void CleanupArchiveDirectories(string? completedDirectoryToKeep, string? buildingDirectoryToKeep)
+    {
+        foreach (string directoryPath in Directory.EnumerateDirectories(DataPath, "*", SearchOption.TopDirectoryOnly))
+        {
+            string directoryName = Path.GetFileName(directoryPath);
+            if (!string.IsNullOrEmpty(completedDirectoryToKeep) &&
+                string.Equals(directoryPath, completedDirectoryToKeep, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!string.IsNullOrEmpty(buildingDirectoryToKeep) &&
+                string.Equals(directoryPath, buildingDirectoryToKeep, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            Directory.Delete(directoryPath, true);
+        }
     }
 
     private static void ConfigureSevenZipLibraryPath()
