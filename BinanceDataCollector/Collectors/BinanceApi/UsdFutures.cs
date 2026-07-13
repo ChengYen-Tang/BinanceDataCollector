@@ -16,7 +16,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         while (cursor < overallEndTime)
         {
             DateTime requestStartTime = GetRequestStartTime(cursor, intervalSpan);
-            WebCallResult<ApiKline[]> result;
+            HttpResult<ApiKline[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetKlinesAsync(symbol, interval, requestStartTime, overallEndTime.Add(intervalSpan), 1500, ct);
@@ -50,7 +50,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         while (cursor < overallEndTime)
         {
             DateTime requestStartTime = GetRequestStartTime(cursor, intervalSpan);
-            WebCallResult<ApiKline[]> result;
+            HttpResult<ApiKline[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetIndexPriceKlinesAsync(symbol, interval, requestStartTime, overallEndTime.Add(intervalSpan), 1500, ct);
@@ -92,7 +92,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         while (cursor < overallEndTime)
         {
             DateTime requestStartTime = GetRequestStartTime(cursor, intervalSpan);
-            WebCallResult<BinanceMarkIndexKline[]> result;
+            HttpResult<BinanceMarkIndexKline[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetMarkPriceKlinesAsync(symbol, interval, 1500, requestStartTime, overallEndTime.Add(intervalSpan), ct);
@@ -126,7 +126,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         while (cursor < overallEndTime)
         {
             DateTime requestStartTime = GetRequestStartTime(cursor, intervalSpan);
-            WebCallResult<BinanceMarkIndexKline[]> result;
+            HttpResult<BinanceMarkIndexKline[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetPremiumIndexKlinesAsync(symbol, interval, requestStartTime, overallEndTime.Add(intervalSpan), 1500, ct);
@@ -155,7 +155,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
     {
         while (true)
         {
-            WebCallResult<BinanceFuturesUsdtExchangeInfo> result;
+            HttpResult<BinanceFuturesUsdtExchangeInfo> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetExchangeInfoAsync(ct);
@@ -186,7 +186,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         while (cursor < overallEndTime)
         {
             DateTime requestStartTime = GetRequestStartTime(cursor, interval);
-            WebCallResult<BinanceFuturesFundingRateHistory[]> result;
+            HttpResult<BinanceFuturesFundingRateHistory[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetFundingRatesAsync(symbol, requestStartTime, overallEndTime.Add(interval), 499, ct);
@@ -220,7 +220,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         {
             DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
             DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
-            WebCallResult<BinanceFuturesOpenInterestHistory[]> result;
+            HttpResult<BinanceFuturesOpenInterestHistory[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
@@ -255,7 +255,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         {
             DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
             DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
-            WebCallResult<BinanceFuturesBasis[]> result;
+            HttpResult<BinanceFuturesBasis[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetBasisAsync(symbol, ContractType.Perpetual, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
@@ -290,7 +290,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         {
             DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
             DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
-            WebCallResult<BinanceFuturesLongShortRatio[]> result;
+            HttpResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetTopLongShortPositionRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
@@ -324,7 +324,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         {
             DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
             DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
-            WebCallResult<BinanceFuturesLongShortRatio[]> result;
+            HttpResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetTopLongShortAccountRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
@@ -358,7 +358,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         {
             DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
             DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
-            WebCallResult<BinanceFuturesLongShortRatio[]> result;
+            HttpResult<BinanceFuturesLongShortRatio[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetGlobalLongShortAccountRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
@@ -392,7 +392,7 @@ internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : Bas
         {
             DateTime requestStartTime = GetRestrictedRequestStartTime(cursor);
             DateTime requestEndTime = GetRestrictedEndTime(cursor, overallEndTime);
-            WebCallResult<BinanceFuturesBuySellVolumeRatio[]> result;
+            HttpResult<BinanceFuturesBuySellVolumeRatio[]> result;
             try
             {
                 result = await base.client.UsdFuturesApi.ExchangeData.GetTakerBuySellVolumeRatioAsync(symbol, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);

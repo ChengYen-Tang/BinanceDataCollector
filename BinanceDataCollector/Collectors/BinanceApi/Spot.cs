@@ -15,7 +15,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
             while (cursor < overallEndTime)
             {
                 DateTime requestStartTime = GetRequestStartTime(cursor, intervalSpan);
-                WebCallResult<ApiKline[]> result;
+                HttpResult<ApiKline[]> result;
                 try
                 {
                     result = await base.client.SpotApi.ExchangeData.GetKlinesAsync(symbol, interval, requestStartTime, overallEndTime.Add(intervalSpan), 1500, ct);
@@ -53,7 +53,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi
         {
             while (true)
             {
-                WebCallResult<BinanceExchangeInfo> result;
+                HttpResult<BinanceExchangeInfo> result;
                 try
                 {
                     result = await base.client.SpotApi.ExchangeData.GetExchangeInfoAsync(ct: ct);
