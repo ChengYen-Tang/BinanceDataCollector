@@ -15,7 +15,7 @@ internal class SpotStorageController : StorageController<SymbolInfoCsv>
     private readonly SpotMarketData spotMarketData;
 
     public SpotStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<SpotStorageController> logger, IBinanceRestClient client)
-        : base(serviceProvider, logger) => (spot, spotMarketData) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? []), new());
+        : base(serviceProvider, logger) => (spot, spotMarketData) = (new(client, configuration.GetSection("IgnoneCoins:Spot").Get<string[]>() ?? [], logger), new());
 
     protected override string MarketPathSegment => Market;
     protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "SymbolInfo.duckdb"); } }

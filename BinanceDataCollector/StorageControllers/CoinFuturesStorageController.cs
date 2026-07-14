@@ -15,7 +15,7 @@ internal class CoinFuturesStorageController : StorageController<SymbolInfoCsv>
     private readonly MarketDataCoinFutures coinFuturesMarketData;
 
     public CoinFuturesStorageController(IConfiguration configuration, IServiceProvider serviceProvider, ILogger<CoinFuturesStorageController> logger, IBinanceRestClient client)
-        : base(serviceProvider, logger) => (coinFutures, coinFuturesMarketData) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? []), new());
+        : base(serviceProvider, logger) => (coinFutures, coinFuturesMarketData) = (new(client, configuration.GetSection("IgnoneCoins:CoinFutures").Get<string[]>() ?? [], logger), new());
 
     protected override string MarketPathSegment => Market;
     protected override string SymbolInfoPath { get { return Path.Combine(RootSymbolInfoPath, "SymbolInfo.duckdb"); } }

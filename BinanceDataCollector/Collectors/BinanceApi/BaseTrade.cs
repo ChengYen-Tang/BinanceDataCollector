@@ -3,7 +3,7 @@ using Binance.Net.Objects.Models.Spot;
 
 namespace BinanceDataCollector.Collectors.BinanceApi;
 
-internal abstract class BaseTrade<T>(IBinanceRestClient client)
+internal abstract class BaseTrade<T>(IBinanceRestClient client, ILogger logger, string market)
 {
     protected static readonly TimeSpan RateLimitRetryDelay = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan MaxRestrictedApiLookback = TimeSpan.FromDays(29);
@@ -13,6 +13,8 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
     private static readonly TimeSpan FundingRateInterval = TimeSpan.FromHours(8);
 
     protected readonly IBinanceRestClient client = client;
+    private readonly ILogger logger = logger;
+    private readonly string market = market;
 
     protected static DateTime ClampRestrictedStartTime(DateTime startTime)
     {
@@ -71,10 +73,24 @@ internal abstract class BaseTrade<T>(IBinanceRestClient client)
             _ => throw new ArgumentOutOfRangeException(nameof(interval), interval, "Unsupported kline interval.")
         };
 
-    protected static bool IsRateLimitError(CryptoExchange.Net.Objects.Error? error)
-        => error is Binance.Net.Objects.BinanceRateLimitError
+    protected bool IsRateLimitError(CryptoExchange.Net.Objects.Error? error, [System.Runtime.CompilerServices.CallerMemberName] string operation = "")
+    {
+        bool isRateLimitError = error is Binance.Net.Objects.BinanceRateLimitError
             or ServerRateLimitError
             || error?.ErrorType == CryptoExchange.Net.Objects.Errors.ErrorType.RateLimitRequest;
+
+        if (isRateLimitError)
+        {
+            logger.LogWarning(
+                "Binance API rate limited. Operation: {Operation}, Market: {Market}, RetryDelay: {RetryDelay}, Error: {Error}",
+                operation,
+                market,
+                RateLimitRetryDelay,
+                error?.Message ?? "<none>");
+        }
+
+        return isRateLimitError;
+    }
 
     public abstract Task<Result<List<IBinanceKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);
     public abstract Task<Result<List<BinanceMarkIndexKline>>> GetPremiumIndexKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default);

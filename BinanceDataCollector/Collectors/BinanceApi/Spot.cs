@@ -4,7 +4,7 @@ using ApiKline = Binance.Net.Interfaces.IBinanceKline;
 
 namespace BinanceDataCollector.Collectors.BinanceApi
 {
-    internal class Spot(IBinanceRestClient client, string[] ignoneCoins) : BaseTrade<BinanceSymbol>(client)
+    internal class Spot(IBinanceRestClient client, string[] ignoneCoins, ILogger logger) : BaseTrade<BinanceSymbol>(client, logger, "Spot")
     {
         public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
         {

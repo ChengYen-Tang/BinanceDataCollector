@@ -5,7 +5,7 @@ using ApiKline = Binance.Net.Interfaces.IBinanceKline;
 
 namespace BinanceDataCollector.Collectors.BinanceApi;
 
-internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins) : BaseTrade<BinanceFuturesUsdtSymbol>(client)
+internal class UsdFutures(IBinanceRestClient client, string[] ignoneCoins, ILogger logger) : BaseTrade<BinanceFuturesUsdtSymbol>(client, logger, "UsdFutures")
 {
     public override async Task<Result<List<ApiKline>>> GetKlinesAsync(string symbol, KlineInterval interval, DateTime startTime, CancellationToken ct = default)
     {
