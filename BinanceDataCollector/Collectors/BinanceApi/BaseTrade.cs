@@ -5,7 +5,7 @@ namespace BinanceDataCollector.Collectors.BinanceApi;
 
 internal abstract class BaseTrade<T>(IBinanceRestClient client, ILogger logger, string market)
 {
-    protected static readonly TimeSpan RateLimitRetryDelay = TimeSpan.FromMinutes(30);
+    protected static readonly TimeSpan RateLimitRetryDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaxRestrictedApiLookback = TimeSpan.FromDays(29);
     private static readonly TimeSpan RestrictedApiPageWindow = TimeSpan.FromMinutes(499 * 5);
     private static readonly TimeSpan RestrictedApiEndTimePadding = TimeSpan.FromMinutes(5);

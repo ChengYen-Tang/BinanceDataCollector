@@ -8,8 +8,8 @@ internal static class DuckDbStorageArchiveHelper
 {
     public const string ArchiveFileName = "BinanceDataCollector.7z";
     private const string HashFileName = ArchiveFileName + ".sha256";
+    private const string DoneFileName = "Done";
     private const long ArchiveVolumeSizeBytes = 100L * 1024 * 1024 * 1024;
-    private const string BuildingDirectorySuffix = ".building";
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
 
     public static string StorageRootPath { get; } = Path.Combine(BasePath, "DataStorage");
@@ -26,13 +26,12 @@ internal static class DuckDbStorageArchiveHelper
 
         string? latestCompletedDirectoryPath = GetLatestCompletedArchiveDirectory();
         string finalDirectoryPath = CreateArchiveDirectoryPath(DateTimeOffset.Now);
-        string buildingDirectoryPath = finalDirectoryPath + BuildingDirectorySuffix;
-        string archivePath = Path.Combine(buildingDirectoryPath, ArchiveFileName);
-        string hashPath = Path.Combine(buildingDirectoryPath, HashFileName);
+        string archivePath = Path.Combine(finalDirectoryPath, ArchiveFileName);
+        string hashPath = Path.Combine(finalDirectoryPath, HashFileName);
+        string donePath = Path.Combine(finalDirectoryPath, DoneFileName);
 
-        CleanupArchiveDirectories(latestCompletedDirectoryPath, buildingDirectoryPath);
-        DeleteDirectoryIfExists(buildingDirectoryPath);
-        Directory.CreateDirectory(buildingDirectoryPath);
+        CleanupArchiveDirectories(latestCompletedDirectoryPath, finalDirectoryPath);
+        Directory.CreateDirectory(finalDirectoryPath);
 
         try
         {
@@ -40,19 +39,19 @@ internal static class DuckDbStorageArchiveHelper
         }
         catch (OperationCanceledException)
         {
-            DeleteDirectoryIfExists(buildingDirectoryPath);
+            DeleteDirectoryIfExists(finalDirectoryPath);
             throw;
         }
 
-        string[] archiveFiles = GetArchiveFiles(buildingDirectoryPath);
+        string[] archiveFiles = GetArchiveFiles(finalDirectoryPath);
         string[] hashLines = await Task.WhenAll(archiveFiles.Select(async path =>
         {
             string hashText = await ComputeSha256Async(path, ct);
             return $"{hashText} *{Path.GetFileName(path)}";
         }));
         await File.WriteAllLinesAsync(hashPath, hashLines, Encoding.ASCII, ct);
+        await File.WriteAllBytesAsync(donePath, [], ct);
 
-        Directory.Move(buildingDirectoryPath, finalDirectoryPath);
         CleanupArchiveDirectories(finalDirectoryPath, null);
         return true;
     }
@@ -141,13 +140,13 @@ internal static class DuckDbStorageArchiveHelper
     {
         string directoryName = timestamp.ToString("yyyyMMdd-HHmm");
         string directoryPath = Path.Combine(DataPath, directoryName);
-        if (!Directory.Exists(directoryPath) && !Directory.Exists(directoryPath + BuildingDirectorySuffix))
+        if (!Directory.Exists(directoryPath))
             return directoryPath;
 
         for (int suffix = 1; ; suffix++)
         {
             string candidatePath = Path.Combine(DataPath, $"{directoryName}-{suffix:D2}");
-            if (Directory.Exists(candidatePath) || Directory.Exists(candidatePath + BuildingDirectorySuffix))
+            if (Directory.Exists(candidatePath))
                 continue;
 
             return candidatePath;
@@ -170,12 +169,16 @@ internal static class DuckDbStorageArchiveHelper
     {
         return Directory
             .EnumerateDirectories(DataPath, "*", SearchOption.TopDirectoryOnly)
-            .Where(path => !Path.GetFileName(path).EndsWith(BuildingDirectorySuffix, StringComparison.OrdinalIgnoreCase))
+            .Where(IsCompletedArchiveDirectory)
             .OrderByDescending(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
     }
 
-    private static void CleanupArchiveDirectories(string? completedDirectoryToKeep, string? buildingDirectoryToKeep)
+    private static bool IsCompletedArchiveDirectory(string directoryPath)
+        => File.Exists(Path.Combine(directoryPath, HashFileName))
+            && File.Exists(Path.Combine(directoryPath, DoneFileName));
+
+    private static void CleanupArchiveDirectories(string? completedDirectoryToKeep, string? inProgressDirectoryToKeep)
     {
         foreach (string directoryPath in Directory.EnumerateDirectories(DataPath, "*", SearchOption.TopDirectoryOnly))
         {
@@ -184,8 +187,8 @@ internal static class DuckDbStorageArchiveHelper
                 string.Equals(directoryPath, completedDirectoryToKeep, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (!string.IsNullOrEmpty(buildingDirectoryToKeep) &&
-                string.Equals(directoryPath, buildingDirectoryToKeep, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(inProgressDirectoryToKeep) &&
+                string.Equals(directoryPath, inProgressDirectoryToKeep, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             Directory.Delete(directoryPath, true);

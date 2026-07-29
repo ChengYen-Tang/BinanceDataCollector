@@ -94,9 +94,14 @@ DataStorage/
 
 ```text
 Data/
-  BinanceDataCollector.7z
-  BinanceDataCollector.7z.sha256
+  20260730-1430/
+    BinanceDataCollector.7z.001
+    BinanceDataCollector.7z.002
+    BinanceDataCollector.7z.sha256
+    Done
 ```
+
+`Done` 是空白完成標記；只有同時存在 `BinanceDataCollector.7z.sha256` 與 `Done` 的日期目錄，才是可用的完整封存產物。
 
 ### `Tmp`
 
