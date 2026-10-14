@@ -5,7 +5,7 @@ services:
     volumes:
       - ./binance-data-collector/config/appsettings.json:/app/appsettings.json
       - ./binance-data-collector/logs:/app/Logs
-      - ./binance-data-collector/data:/app/Data
+      - ./DataStorage:/app/DataStorage
       - /etc/localtime:/etc/localtime:ro
     container_name: BinanceDataCollector
     depends_on:

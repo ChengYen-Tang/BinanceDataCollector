@@ -21,6 +21,7 @@ internal static class DuckDbStorageHelper
     private const int LargeRowGroupSize = 524_288;
     private const string BootstrapCatalogName = "bootstrap";
     private const string LargeRowGroupStorageVersion = "v1.2.0";
+    private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -31,6 +32,8 @@ internal static class DuckDbStorageHelper
     private static int activeOperations;
     private static bool isClosing;
     private static long tempTableId;
+
+    internal static string StorageRootPath { get; } = Path.Combine(BasePath, "DataStorage");
 
     public static Task ReplaceTableAsync<T>(string dbPath, string tableName, IEnumerable<T> records, CancellationToken ct = default)
         => ReplaceTableAsync(dbPath, tableName, records, null, false, ct);

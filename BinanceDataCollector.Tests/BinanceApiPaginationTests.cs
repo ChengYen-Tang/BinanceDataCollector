@@ -1,5 +1,6 @@
 using Binance.Net.Enums;
 using BinanceDataCollector.Collectors.BinanceApi;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace BinanceDataCollector.Tests;
 
@@ -79,11 +80,11 @@ public sealed class BinanceApiPaginationTests
     [TestMethod]
     public void GetRestrictedRequestStartTime_UsesFiveMinuteOverlap()
     {
-        DateTime currentStartTime = new(2026, 05, 28, 12, 30, 00, DateTimeKind.Utc);
+        DateTime currentStartTime = DateTime.Today.AddHours(12).AddMinutes(30);
 
         DateTime requestStartTime = TestBaseTrade.GetRestrictedRequestStartTimeForTest(currentStartTime);
 
-        Assert.AreEqual(new DateTime(2026, 05, 28, 12, 25, 00, DateTimeKind.Utc), requestStartTime);
+        Assert.AreEqual(currentStartTime.AddMinutes(-5), requestStartTime);
     }
 
     [TestMethod]
@@ -98,7 +99,7 @@ public sealed class BinanceApiPaginationTests
 
     private sealed class TestBaseTrade : BaseTrade<object>
     {
-        public TestBaseTrade() : base(null!)
+        public TestBaseTrade() : base(null!, NullLogger.Instance, "Test")
         {
         }
 

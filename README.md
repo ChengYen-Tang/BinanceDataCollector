@@ -2,7 +2,7 @@
 
 一個以 .NET Worker Service 實作的 Binance 歷史資料收集器。
 
-目前系統已完全改成 DuckDB 儲存架構，不再依賴 SQL Server、EF Core migration 或舊的 sharding table 設計。程式會定期抓取 Binance 歷史資料，直接寫入各 market / symbol 對應的 DuckDB 檔案，並在同步完成後封存整個資料目錄。
+目前系統已完全改成 DuckDB 儲存架構，不再依賴 SQL Server、EF Core migration 或舊的 sharding table 設計。程式會定期抓取 Binance 歷史資料，直接寫入各 market / symbol 對應的 DuckDB 檔案。
 
 ## 目前支援的資料
 
@@ -41,14 +41,13 @@
 4. 各 market 先 `PrepareAsync()` 抓 market info
 5. 再 `DispatchAsync()` 發送各 symbol 的 gather / insert / delete 工作
 6. 所有 pipeline 完成後，checkpoint 目前有修改過的 DuckDB
-7. 將整個 `DataStorage` 封存成 `Data/BinanceDataCollector.7z`
+7. 更新 `DataStorage/DataStorageManifest.json`，記錄所有 DuckDB 檔案與 SHA-256
 
 ### Checkpoint 與停止行為
 
 - 一般 symbol 依正常流程完成時才做 checkpoint
 - `AggTrades` / `BookDepth` 在 symbol scope 結束時 checkpoint
 - 若收到停止訊號，系統會先要求 Hangfire job 停止，再等待當前工作安全收尾
-- 封存流程會接收 cancellation，避免 shutdown 時無限制持續壓縮
 
 ### Temp 資料夾
 
@@ -86,22 +85,10 @@ DataStorage/
       BTCUSDT.duckdb
   SymbolInfo/
     SymbolInfo.duckdb
+  DataStorageManifest.json
 ```
 
-### `Data`
-
-封存輸出目錄：
-
-```text
-Data/
-  20260730-1430/
-    BinanceDataCollector.7z.001
-    BinanceDataCollector.7z.002
-    BinanceDataCollector.7z.sha256
-    Done
-```
-
-`Done` 是空白完成標記；只有同時存在 `BinanceDataCollector.7z.sha256` 與 `Done` 的日期目錄，才是可用的完整封存產物。
+`DataStorageManifest.json` 會在每次 pipeline 正常完成後更新，記錄每個 `*.duckdb` 的相對路徑與 SHA-256。
 
 ### `Tmp`
 
@@ -141,6 +128,16 @@ Tmp/
 ```
 
 目前 `ProductionLine` 主要控制的是 pipeline 內不同工作階段的併行數。實際 gather / insert 的行為還會受到各 controller 與 queue 流程影響。
+
+### DataStorage 完整性檢查
+
+```json
+"DataStorage": {
+  "ValidateIntegrityOnStartup": false
+}
+```
+
+設為 `true` 時，每次 Hangfire task 開始、寫入資料前會讀取 `DataStorageManifest.json`，逐一確認 manifest 記錄的 DuckDB 檔案存在且 SHA-256 相符；缺少 manifest、缺檔或 hash 不一致都會丟例外，使 task 失敗。新建立的 DuckDB 檔案會在本次 task 正常完成後寫入新的 manifest。首次啟用時，應先以 `false` 完成一次同步以建立 manifest。
 
 ### 忽略幣種
 
@@ -191,7 +188,7 @@ dotnet run --project BinanceDataIntegrityChecker/BinanceDataIntegrityChecker.csp
 
 ## 專案結構
 
-- [BinanceDataCollector](BinanceDataCollector)：主收集器，包含 worker、Hangfire、collector controller、DuckDB 寫入與封存
+- [BinanceDataCollector](BinanceDataCollector)：主收集器，包含 worker、Hangfire、collector controller 與 DuckDB 寫入
 - [CollectorModels](CollectorModels)：共用的 DuckDB / storage model 類型
 - [BinanceDataIntegrityChecker](BinanceDataIntegrityChecker)：DuckDB 完整性檢查工具
 - [BinanceDataCollector.Tests](BinanceDataCollector.Tests)：測試專案

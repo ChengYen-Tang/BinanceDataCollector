@@ -30,7 +30,7 @@ internal abstract class StorageController<T>
     protected readonly ILogger logger;
     protected readonly DateTime yearsReserved;
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
-    protected static string DataPath = DuckDbStorageArchiveHelper.StorageRootPath;
+    protected static string DataPath = DuckDbStorageHelper.StorageRootPath;
     protected static string MarketDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "BinanceMarketData");
     protected static string MarketDataTempPath = Path.Combine(BasePath, "Tmp", "BinanceMarketData");
     protected static string RootKlinePath = Path.Combine(DataPath, "Kline");

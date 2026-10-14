@@ -215,7 +215,14 @@ internal class CoinFutures(IBinanceRestClient client, string[] ignoneCoins, ILog
             HttpResult<BinanceFuturesCoinOpenInterestHistory[]> result;
             try
             {
-                result = await base.client.CoinFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(pair, contractType, PeriodInterval.FiveMinutes, 499, requestStartTime, requestEndTime, ct);
+                result = await base.client.CoinFuturesApi.ExchangeData.GetOpenInterestHistoryAsync(
+                    pair: pair,
+                    period: PeriodInterval.FiveMinutes,
+                    contractType: contractType,
+                    limit: 499,
+                    startTime: requestStartTime,
+                    endTime: requestEndTime,
+                    ct: ct);
             }
             catch (Exception ex)
             {
