@@ -31,6 +31,56 @@
 - `AggTrades` 與 `BookDepth` 也已改成每個 symbol 一個 DuckDB 檔案
 - 不再有多個 thread 共同寫入同一個 DuckDB 檔案的設計
 
+### DuckDB 儲存設定
+
+所有系列（包含 SymbolInfo）統一使用 `storage_compatibility_version=latest`，
+讓目前 DuckDB 引擎可使用最新儲存編碼。區塊大小維持預設的 256 KiB。
+
+| 資料系列 | Row Group Size |
+|---|---:|
+| AggTrades | 524288 |
+| BookDepth | 262144 |
+| Kline、其餘 API 系列與 SymbolInfo | 122880（DuckDB 預設） |
+
+設定集中在共用連線入口；AggTrades / BookDepth 每次開啟寫入或 checkpoint 連線時，
+會重新帶入 attachment-scoped row group 設定，不會為了設定參數提前建立檔案或目錄。
+這兩類資料的同檔操作會序列化，不同 symbol 的檔案仍可並行處理。
+
+`latest` 代表目前引擎支援的儲存格式，不是啟動時自動完整重建舊檔。
+既有資料不會因套件升級而保證全部重新編碼；此次上線前會另行完整重建資料，
+本次變更不加入自動重建或舊格式分支。新格式也不保證可由舊版 DuckDB 讀取。
+
+### 時間主鍵編碼
+
+為降低時間主鍵 ART 索引的空間成本，下列系列使用可逆的整數時間編碼。
+模型、API 請求與儲存 helper 的續傳時間仍使用 Unix 毫秒；只有 DuckDB 實體主鍵改用新欄位名稱。
+
+| 資料系列 | 實體 BIGINT PRIMARY KEY | 毫秒值還原 |
+|---|---|---|
+| Kline、PremiumIndexKline、IndexPriceKline、MarkPriceKline | `CloseTimeMinute` | `CloseTimeMinute * 60000 + 59999` |
+| OpenInterestHistory、Basis、GlobalLongShortAccountRatio、TopLongShortAccountRatio、TopLongShortPositionRatio、TakerLongShortRatio | `Timestamp5Minute` | `Timestamp5Minute * 300000` |
+
+- Kline 目前收集一分鐘 K 線；六種 API 系列目前請求五分鐘區間。所有 market 使用同一儲存合約。
+- 每筆輸入都必須精確對齊上述時間網格；否則整個 batch 會拋出 `InvalidDataException`，不會截斷、四捨五入或先刪除既有資料。
+- 真正的 PRIMARY KEY 與 NOT NULL 約束保留，重疊資料仍在同一 transaction 中先刪除再寫入；已接受的 batch 不會被取消訊號中斷。
+- 續傳直接取編碼主鍵的 MAX 再還原毫秒。保留期限刪除採整數向上取整界線，正確處理未對齊的刪除時間，不逐列解碼後再篩選。
+- 價格、數量等 DOUBLE 欄位不變。FundingRate 的時間可能未對齊，不做此編碼；AggTrades、BookDepth、SymbolInfo 也不改時間格式。
+- 上線前須重建這些系列的舊資料。遇到舊毫秒欄位或缺少 PRIMARY KEY 的表會拒絕操作；舊 shared database 也不能直接複製成新格式，不會自動搬移、改寫或刪除它。
+
+外部查詢工具必須使用新欄位名稱及單位，例如 Kline：
+
+```sql
+-- 主鍵範圍查詢請先把毫秒界線轉成分鐘編號，再對 CloseTimeMinute 篩選。
+SELECT OpenTime, OpenPrice, HighPrice, LowPrice, ClosePrice,
+       CloseTimeMinute * 60000 + 59999 AS CloseTime
+FROM data
+ORDER BY CloseTimeMinute;
+```
+
+`BinanceDataIntegrityChecker` 目前只檢查 AggTrades / BookDepth，其欄位與檢查規則不受影響；
+`DataStorageManifest.json` 仍針對完整檔案計算 SHA-256，不依賴表欄位名稱。
+未全面套用 DECIMAL、小 block、強制 codec 或 value-first 排序，因實驗結果並非各系列皆有利。
+
 ### 寫入流程
 
 程式啟動後會：

@@ -457,21 +457,17 @@ public sealed class DuckDbStorageHelperTests
     {
         string dbPath = Path.Combine(tempDirectory, "bootstrap", "storage.duckdb");
 
-        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(
-            dbPath,
-            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(dbPath);
 
         Assert.IsTrue(File.Exists(dbPath));
     }
 
     [TestMethod]
-    public async Task EnsureDatabaseCreatedAsync_WhenUsingLargeRowGroupProfile_AllowsSubsequentDirectOpenWrites()
+    public async Task EnsureDatabaseCreatedAsync_AllowsSubsequentWrites()
     {
         string dbPath = Path.Combine(tempDirectory, "bootstrap-write", "storage.duckdb");
 
-        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(
-            dbPath,
-            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+        await DuckDbStorageHelper.EnsureDatabaseCreatedAsync(dbPath);
 
         await DuckDbStorageHelper.ReplaceTableAsync(
             dbPath,
@@ -1102,8 +1098,7 @@ public sealed class DuckDbStorageHelperTests
             "BTCUSDT",
             csvPath,
             AggTradesCsvSchema.Futures,
-            sourceIsMicroseconds: false,
-            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+            sourceIsMicroseconds: false);
 
         Assert.IsTrue(File.Exists(dbPath));
 
@@ -1185,8 +1180,7 @@ public sealed class DuckDbStorageHelperTests
         await DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(
             dbPath,
             "BTCUSDT",
-            csvPath,
-            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+            csvPath);
 
         Assert.IsTrue(File.Exists(dbPath));
 
@@ -1205,11 +1199,429 @@ public sealed class DuckDbStorageHelperTests
         Assert.AreEqual(1_735_689_720_000L, reader.GetInt64(2));
     }
 
+    [TestMethod]
+    [DataRow("aggTrades", 524288)]
+    [DataRow("bookDepth", 262144)]
+    [DataRow("Kline", 122880)]
+    [DataRow("IndexPriceKline", 122880)]
+    [DataRow("MarkPriceKline", 122880)]
+    [DataRow("PremiumIndexKline", 122880)]
+    [DataRow("FundingRate", 122880)]
+    [DataRow("OpenInterestHistory", 122880)]
+    [DataRow("Basis", 122880)]
+    [DataRow("GlobalLongShortAccountRatio", 122880)]
+    [DataRow("TopLongShortAccountRatio", 122880)]
+    [DataRow("TopLongShortPositionRatio", 122880)]
+    [DataRow("TakerLongShortRatio", 122880)]
+    [DataRow("SymbolInfo", 122880)]
+    public async Task StorageSettings_FirstWriteAndReopen_UseLatestAndExpectedRowGroups(string series, int expectedGroup)
+    {
+        string dbPath = CreateMarketDataDbPath(series);
+        Assert.IsNull(await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", "Sequence"));
+        Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(dbPath)), "A missing-file read must not create storage folders.");
+
+        await DuckDbStorageHelper.ReplaceTableAsync(dbPath, "Rows", [new QueryLongRecord { Id = "1", Sequence = 123 }]);
+        string expectedVersion;
+        using (DuckDBConnection reference = new("Data Source=:memory:"))
+        {
+            reference.Open();
+            string referencePath = Path.Combine(tempDirectory, "native-latest.duckdb").Replace("'", "''", StringComparison.Ordinal);
+            using DuckDBCommand command = reference.CreateCommand();
+            command.CommandText = $"ATTACH '{referencePath}' AS expected (STORAGE_VERSION 'latest'); USE expected; CREATE TABLE reference_row(id INTEGER); CHECKPOINT;";
+            command.ExecuteNonQuery();
+            command.CommandText = "SELECT tags['storage_version'] FROM duckdb_databases() WHERE database_name=current_database();";
+            expectedVersion = (string)command.ExecuteScalar()!;
+        }
+
+        foreach (string table in new[] { "first_open", "reopened" })
+        {
+            await DuckDbStorageHelper.ExecuteWithConnectionAsync(dbPath, connection =>
+            {
+                using DuckDBCommand command = connection.CreateCommand();
+                command.CommandText = $"SET threads=1; CREATE TABLE {table} AS SELECT range AS id FROM range(600000); CHECKPOINT;";
+                command.ExecuteNonQuery();
+                return Task.CompletedTask;
+            });
+            await AssertStorageLayoutAsync(dbPath, table, expectedVersion, expectedGroup);
+        }
+
+        await DuckDbStorageHelper.CheckpointAsync(dbPath);
+        await DuckDbStorageHelper.CheckpointDirtyDatabasesAsync();
+        await DuckDbStorageHelper.CheckpointStorageAsync(Path.Combine(tempDirectory, series));
+        await AssertStorageLayoutAsync(dbPath, "reopened", expectedVersion, expectedGroup);
+        Assert.AreEqual(123L, await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows", "Sequence"));
+    }
+
+    [TestMethod]
+    [DataRow("aggTrades")]
+    [DataRow("bookDepth")]
+    public async Task StorageSettings_TunedFiles_AllowConcurrentOperationsAndCheckpoint(string series)
+    {
+        string dbPath = CreateMarketDataDbPath(series);
+        Task[] tasks = Enumerable.Range(0, 8).Select(index => Task.Run(async () =>
+        {
+            await DuckDbStorageHelper.UpsertRowsAsync(dbPath, "Rows" + index,
+                [new QueryLongRecord { Id = "1", Sequence = index }], nameof(QueryLongRecord.Id));
+            await DuckDbStorageHelper.ExecuteWithConnectionAsync(dbPath, async connection =>
+            {
+                using DuckDBCommand command = connection.CreateCommand();
+                command.CommandText = $"SELECT Sequence FROM Rows{index};";
+                Assert.AreEqual((long)index, Convert.ToInt64(await command.ExecuteScalarAsync()));
+            });
+            await DuckDbStorageHelper.CheckpointAsync(dbPath);
+        })).ToArray();
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
+        CollectionAssert.AreEquivalent(Enumerable.Range(0, 8).Select(i => "Rows" + i).ToArray(),
+            await DuckDbStorageHelper.GetTableNamesAsync(dbPath));
+        for (int index = 0; index < 8; index++)
+            Assert.AreEqual((long)index, await DuckDbStorageHelper.GetMaxInt64Async(dbPath, "Rows" + index, "Sequence"));
+    }
+
+    [TestMethod]
+    [DataRow("aggTrades", "UsdFutures")]
+    [DataRow("bookDepth", "CoinFutures")]
+    public async Task StorageSettings_DifferentSymbols_RunConcurrently(string series, string market)
+    {
+        TaskCompletionSource secondEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task first = DuckDbStorageHelper.ExecuteWithConnectionAsync(Path.Combine(tempDirectory, series, market, "AAA.duckdb"),
+            async connection =>
+            {
+                await secondEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                using DuckDBCommand command = connection.CreateCommand();
+                command.CommandText = "SELECT 1;";
+                Assert.AreEqual(1, Convert.ToInt32(command.ExecuteScalar()));
+            });
+        Task second = DuckDbStorageHelper.ExecuteWithConnectionAsync(Path.Combine(tempDirectory, series, market, "BBB.duckdb"),
+            connection =>
+            {
+                using DuckDBCommand command = connection.CreateCommand();
+                command.CommandText = "SELECT 2;";
+                Assert.AreEqual(2, Convert.ToInt32(command.ExecuteScalar()));
+                secondEntered.SetResult();
+                return Task.CompletedTask;
+            });
+        await Task.WhenAll(first, second);
+    }
+
+    [TestMethod]
+    [DataRow("aggTrades")]
+    [DataRow("bookDepth")]
+    public async Task StorageSettings_CanceledCsvImport_DoesNotCreateStorage(string series)
+    {
+        string dbPath = CreateMarketDataDbPath(series);
+        string csvPath = Path.Combine(tempDirectory, "canceled.csv");
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+        if (series == "aggTrades")
+        {
+            WriteAggTradesCsv(csvPath, 3, AggTradesCsvSchema.Futures);
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(() =>
+                DuckDbStorageHelper.AppendAggTradesFromCsvAsync(dbPath, "data", csvPath, AggTradesCsvSchema.Futures, false, cts.Token));
+        }
+        else
+        {
+            WriteBookDepthCsv(csvPath, 3);
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(() =>
+                DuckDbStorageHelper.ReplaceBookDepthTailFromCsvAsync(dbPath, "data", csvPath, cts.Token));
+        }
+        Assert.IsFalse(File.Exists(dbPath));
+        Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(dbPath)));
+    }
+
+    [TestMethod]
+    [DataRow("Kline", "CloseTime", "CloseTimeMinute", 60000L, 59999L, "ClosePrice")]
+    [DataRow("IndexPriceKline", "CloseTime", "CloseTimeMinute", 60000L, 59999L, "ClosePrice")]
+    [DataRow("MarkPriceKline", "CloseTime", "CloseTimeMinute", 60000L, 59999L, "ClosePrice")]
+    [DataRow("PremiumIndexKline", "CloseTime", "CloseTimeMinute", 60000L, 59999L, "ClosePrice")]
+    [DataRow("OpenInterestHistory", "Timestamp", "Timestamp5Minute", 300000L, 0L, "SumOpenInterest")]
+    [DataRow("Basis", "Timestamp", "Timestamp5Minute", 300000L, 0L, "BasisValue")]
+    [DataRow("GlobalLongShortAccountRatio", "Timestamp", "Timestamp5Minute", 300000L, 0L, "LongShortRatio")]
+    [DataRow("TopLongShortAccountRatio", "Timestamp", "Timestamp5Minute", 300000L, 0L, "LongShortRatio")]
+    [DataRow("TopLongShortPositionRatio", "Timestamp", "Timestamp5Minute", 300000L, 0L, "LongShortRatio")]
+    [DataRow("TakerLongShortRatio", "Timestamp", "Timestamp5Minute", 300000L, 0L, "BuySellRatio")]
+    public async Task TimeKeys_AllSeries_PreserveAtomicUpsertsQueriesAndPrimaryKey(
+        string series, string logicalColumn, string physicalColumn, long unit, long offset, string valueColumn)
+    {
+        const long firstKey = 28_000_000;
+        double original = BitConverter.Int64BitsToDouble(0x3FF0000000000001);
+        foreach (string market in new[] { "Spot", "UsdFutures", "CoinFutures" })
+        {
+            string path = Path.Combine(tempDirectory, series, market, "TEST.duckdb");
+            long first = firstKey * unit + offset;
+            await UpsertTimeRowsAsync(series, path, [(first, original), (first + unit, 2.5)]);
+            await DuckDbStorageHelper.CheckpointAsync(path);
+            await UpsertTimeRowsAsync(series, path, [(first + unit, 3.5), (first + unit * 2, 4.5)]);
+            await DuckDbStorageHelper.CheckpointAsync(path);
+
+            Assert.AreEqual(first + unit * 2, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn));
+            Assert.AreEqual(first, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn,
+                new Dictionary<string, object?> { [logicalColumn] = first }));
+            Assert.IsNull(await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn,
+                new Dictionary<string, object?> { [logicalColumn] = first + 1 }));
+            Assert.IsNull(await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn,
+                new Dictionary<string, object?> { [logicalColumn] = null }));
+
+            using (DuckDBConnection connection = new(new DuckDBConnectionStringBuilder { DataSource = path }.ConnectionString))
+            {
+                connection.Open();
+                using DuckDBCommand command = connection.CreateCommand();
+                command.CommandText = $"SELECT {physicalColumn}, {valueColumn} FROM data ORDER BY {physicalColumn};";
+                using (var reader = command.ExecuteReader())
+                {
+                    Assert.IsTrue(reader.Read());
+                    Assert.AreEqual(firstKey, reader.GetInt64(0));
+                    Assert.AreEqual(BitConverter.DoubleToInt64Bits(original), BitConverter.DoubleToInt64Bits(reader.GetDouble(1)));
+                    Assert.IsTrue(reader.Read());
+                    Assert.AreEqual(firstKey + 1, reader.GetInt64(0));
+                    Assert.AreEqual(3.5, reader.GetDouble(1));
+                    Assert.IsTrue(reader.Read());
+                    Assert.AreEqual(firstKey + 2, reader.GetInt64(0));
+                    Assert.AreEqual(4.5, reader.GetDouble(1));
+                    Assert.IsFalse(reader.Read());
+                }
+                command.CommandText = $"SELECT COUNT(*) FROM duckdb_constraints() WHERE database_name=current_database() AND table_name='data' AND constraint_type='PRIMARY KEY' AND constraint_column_names=['{physicalColumn}'];";
+                Assert.AreEqual(1L, Convert.ToInt64(command.ExecuteScalar()));
+                command.CommandText = "INSERT INTO data SELECT * FROM data LIMIT 1;";
+                Assert.Throws<DuckDBException>(() => command.ExecuteNonQuery());
+                command.CommandText = $"INSERT INTO data ({physicalColumn}) VALUES (NULL);";
+                Assert.Throws<DuckDBException>(() => command.ExecuteNonQuery());
+            }
+
+            // An off-grid retention threshold must delete the preceding aligned key.
+            await DuckDbStorageHelper.DeleteRowsBeforeAsync(path, "data", logicalColumn, first + unit + 1);
+            Assert.AreEqual(first + unit * 2, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn));
+            await DuckDbStorageHelper.DeleteRowsBeforeAsync(path, "data", logicalColumn, first + unit * 2);
+            Assert.AreEqual(first + unit * 2, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn));
+            await DuckDbStorageHelper.DeleteRowsBeforeAsync(path, "data", logicalColumn, first + unit * 2 + 1);
+            Assert.IsNull(await DuckDbStorageHelper.GetMaxInt64Async(path, "data", logicalColumn));
+        }
+    }
+
+    [TestMethod]
+    [DataRow("Kline", "CloseTime", 60000L, 59999L)]
+    [DataRow("OpenInterestHistory", "Timestamp", 300000L, 0L)]
+    public async Task TimeKeys_InvalidInputAndCanceledStart_DoNotCreateOrMutateStorage(string series, string column, long unit, long offset)
+    {
+        string path = CreateMarketDataDbPath(series);
+        long first = 28_000_000 * unit + offset;
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => UpsertTimeRowsAsync(series, path, [(first + 1, 1)]));
+        Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(path)));
+        using CancellationTokenSource canceled = new();
+        canceled.Cancel();
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => UpsertTimeRowsAsync(series, path, [(first, 1)], canceled.Token));
+        Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(path)));
+
+        await UpsertTimeRowsAsync(series, path, [(first, 1)]);
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => UpsertTimeRowsAsync(series, path, [(first, 9), (first + unit + 1, 2)]));
+        Assert.AreEqual(first, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", column));
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"SELECT {(series == "Kline" ? "ClosePrice" : "SumOpenInterest")} FROM data;";
+            Assert.AreEqual(1d, Convert.ToDouble(command.ExecuteScalar()));
+            return Task.CompletedTask;
+        });
+
+        // Duplicate input fails after the DELETE; the surrounding transaction restores the original row.
+        await Assert.ThrowsAsync<DuckDBException>(() => UpsertTimeRowsAsync(series, path, [(first, 8), (first, 9)]));
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"SELECT {(series == "Kline" ? "ClosePrice" : "SumOpenInterest")} FROM data;";
+            Assert.AreEqual(1d, Convert.ToDouble(command.ExecuteScalar()));
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    [DataRow("Kline", "CloseTime", 119999L)]
+    [DataRow("OpenInterestHistory", "Timestamp", 300000L)]
+    public async Task TimeKeys_OldSchema_RequiresRebuildWithoutChangingOriginalRows(string series, string column, long timestamp)
+    {
+        string path = CreateMarketDataDbPath(series);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (DuckDBConnection connection = new(new DuckDBConnectionStringBuilder { DataSource = path }.ConnectionString))
+        {
+            connection.Open();
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"CREATE TABLE data ({column} BIGINT PRIMARY KEY); INSERT INTO data VALUES ({timestamp});";
+            command.ExecuteNonQuery();
+        }
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => UpsertTimeRowsAsync(series, path, [(timestamp, 1)]));
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => DuckDbStorageHelper.GetMaxInt64Async(path, "data", column));
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => DuckDbStorageHelper.DeleteRowsBeforeAsync(path, "data", column, timestamp + 1));
+        string target = Path.Combine(tempDirectory, series, "Spot", "copy.duckdb");
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => DuckDbStorageHelper.CopyTableAsync(path, "data", target, "data"));
+        Assert.IsFalse(File.Exists(target));
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = $"SELECT {column} FROM data;";
+            Assert.AreEqual(timestamp, Convert.ToInt64(command.ExecuteScalar()));
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    [DataRow("Kline", "CloseTime", 60000L, 59999L)]
+    [DataRow("OpenInterestHistory", "Timestamp", 300000L, 0L)]
+    public void TimeKeys_IntegerBounds_AreExactAtNegativeTimesAndInt64Limits(string series, string column, long unit, long offset)
+    {
+        DuckDbTimeKey encoding = DuckDbTimeKey.ForColumn(CreateMarketDataDbPath(series), column)!;
+        foreach (long threshold in new[] { long.MinValue, -unit - 1, -unit, -1L, 0L, offset, offset + 1, unit, long.MaxValue })
+        {
+            long boundary = encoding.ExclusiveUpperBound(threshold);
+            Int128 firstRetained = (Int128)boundary * unit + offset;
+            Assert.IsTrue(firstRetained >= threshold);
+            Assert.IsTrue(firstRetained - unit < threshold);
+            if (firstRetained <= long.MaxValue)
+                Assert.AreEqual((long)firstRetained, encoding.Decode(encoding.Encode((long)firstRetained)));
+        }
+        Assert.ThrowsExactly<InvalidDataException>(() => encoding.Encode(offset + 1));
+        Assert.ThrowsExactly<OverflowException>(() => encoding.Decode(long.MaxValue));
+    }
+
+    [TestMethod]
+    public async Task TimeKeys_PersistedMultiRowGroupIndex_AllowsOverlappingDailyBatch()
+    {
+        string path = CreateMarketDataDbPath("Kline");
+        const int prefixCount = 130_000;
+        const long start = 1_735_689_659_999;
+        await DuckDbStorageHelper.ReplaceTableAsync(path, "data",
+            Enumerable.Range(0, prefixCount).Select(index => CreateKline(start + index * 60000L - 59999, start + index * 60000L, index + 1)),
+            "CloseTime", recreateTable: true);
+        await DuckDbStorageHelper.CheckpointAsync(path);
+        long tail = start + (prefixCount - 1) * 60000L;
+        await UpsertTimeRowsAsync("Kline", path, Enumerable.Range(0, 1441).Select(index => (tail + index * 60000L, 900d + index)).ToArray());
+        await DuckDbStorageHelper.CheckpointAsync(path);
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*), COUNT(DISTINCT CloseTimeMinute), MIN(CloseTimeMinute), MAX(CloseTimeMinute) FROM data;";
+            using (var reader = command.ExecuteReader())
+            {
+                Assert.IsTrue(reader.Read());
+                Assert.AreEqual(prefixCount + 1440L, reader.GetInt64(0));
+                Assert.AreEqual(prefixCount + 1440L, reader.GetInt64(1));
+                Assert.AreEqual((start - 59999) / 60000, reader.GetInt64(2));
+                Assert.AreEqual((tail + 1440L * 60000 - 59999) / 60000, reader.GetInt64(3));
+            }
+            command.CommandText = $"SELECT ClosePrice FROM data WHERE CloseTimeMinute={(tail - 59999) / 60000};";
+            Assert.AreEqual(900d, Convert.ToDouble(command.ExecuteScalar()));
+            command.CommandText = $"SELECT COUNT(*) FROM data WHERE CloseTimeMinute < {(tail - 59999) / 60000} AND ClosePrice <> CloseTimeMinute - {(start - 59999) / 60000} + 1;";
+            Assert.AreEqual(0L, Convert.ToInt64(command.ExecuteScalar()));
+            return Task.CompletedTask;
+        });
+        Assert.AreEqual(tail + 1440L * 60000, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", "CloseTime"));
+    }
+
+    [TestMethod]
+    public async Task TimeKeys_ReplaceTableAndEmptyReplacement_PreserveEncodingAndConstraints()
+    {
+        string path = CreateMarketDataDbPath("OpenInterestHistory");
+        await DuckDbStorageHelper.ReplaceTableAsync(path, "data", new[] { new OpenInterestHistory { Timestamp = 300000, SumOpenInterest = 1 } }, "Timestamp", true);
+        await DuckDbStorageHelper.ReplaceTableAsync(path, "data", new[] { new OpenInterestHistory { Timestamp = 600000, SumOpenInterest = 2 } }, "Timestamp", false);
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => DuckDbStorageHelper.ReplaceTableAsync(path, "data",
+            new[] { new OpenInterestHistory { Timestamp = 600001, SumOpenInterest = 3 } }, "Timestamp", true));
+        Assert.AreEqual(600000L, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", "Timestamp"));
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT Timestamp5Minute, SumOpenInterest FROM data;";
+            using var reader = command.ExecuteReader();
+            Assert.IsTrue(reader.Read());
+            Assert.AreEqual(2L, reader.GetInt64(0));
+            Assert.AreEqual(2d, reader.GetDouble(1));
+            Assert.IsFalse(reader.Read());
+            return Task.CompletedTask;
+        });
+        await DuckDbStorageHelper.ReplaceTableAsync<OpenInterestHistory>(path, "data", [], "Timestamp", false);
+        Assert.IsNull(await DuckDbStorageHelper.GetMaxInt64Async(path, "data", "Timestamp"));
+    }
+
+    [TestMethod]
+    public async Task TimeKeys_CancellationAfterBatchAccepted_FinishesBatchAndCheckpoint()
+    {
+        string path = CreateMarketDataDbPath("Kline");
+        using CancellationTokenSource canceled = new();
+        IEnumerable<Kline> Rows()
+        {
+            yield return CreateKline(0, 59999, 1);
+            canceled.Cancel();
+            yield return CreateKline(60000, 119999, 2);
+        }
+        await DuckDbStorageHelper.UpsertRowsAsync(path, "data", Rows(), "CloseTime", canceled.Token);
+        Assert.IsTrue(canceled.IsCancellationRequested);
+        await DuckDbStorageHelper.CheckpointAsync(path, CancellationToken.None);
+        Assert.AreEqual(119999L, await DuckDbStorageHelper.GetMaxInt64Async(path, "data", "CloseTime"));
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => UpsertTimeRowsAsync("Kline", path, [(179999, 3)], canceled.Token));
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*), SUM(ClosePrice) FROM data;";
+            using var reader = command.ExecuteReader();
+            Assert.IsTrue(reader.Read());
+            Assert.AreEqual(2L, reader.GetInt64(0));
+            Assert.AreEqual(3d, reader.GetDouble(1));
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    public async Task TimeKeys_EncodedColumnWithoutPrimaryKey_IsRejected()
+    {
+        string path = CreateMarketDataDbPath("OpenInterestHistory");
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE data(Timestamp5Minute BIGINT, SumOpenInterest DOUBLE, SumOpenInterestValue DOUBLE); INSERT INTO data VALUES (1, 5, 6);";
+            command.ExecuteNonQuery();
+            return Task.CompletedTask;
+        });
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => UpsertTimeRowsAsync("OpenInterestHistory", path, [(300000, 9)]));
+        await DuckDbStorageHelper.ExecuteWithConnectionAsync(path, connection =>
+        {
+            using DuckDBCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT SumOpenInterest FROM data;";
+            Assert.AreEqual(5d, Convert.ToDouble(command.ExecuteScalar()));
+            return Task.CompletedTask;
+        });
+    }
+
+    private static Task UpsertTimeRowsAsync(string series, string path, (long Time, double Value)[] rows, CancellationToken ct = default)
+        => series switch
+        {
+            "Kline" => DuckDbStorageHelper.UpsertRowsAsync(path, "data", rows.Select(row => CreateKline(row.Time - 59999, row.Time, row.Value)), "CloseTime", ct),
+            "IndexPriceKline" or "MarkPriceKline" or "PremiumIndexKline" => DuckDbStorageHelper.UpsertRowsAsync(path, "data",
+                rows.Select(row => new PremiumIndexKline { CloseTime = row.Time, ClosePrice = row.Value }), "CloseTime", ct),
+            "OpenInterestHistory" => DuckDbStorageHelper.UpsertRowsAsync(path, "data",
+                rows.Select(row => new OpenInterestHistory { Timestamp = row.Time, SumOpenInterest = row.Value }), "Timestamp", ct),
+            "Basis" => DuckDbStorageHelper.UpsertRowsAsync(path, "data",
+                rows.Select(row => new FuturesBasisCsv { Timestamp = row.Time, BasisValue = row.Value }), "Timestamp", ct),
+            "TakerLongShortRatio" => DuckDbStorageHelper.UpsertRowsAsync(path, "data",
+                rows.Select(row => new TakerLongShortRatioCsv { Timestamp = row.Time, BuySellRatio = row.Value }), "Timestamp", ct),
+            _ => DuckDbStorageHelper.UpsertRowsAsync(path, "data",
+                rows.Select(row => new LongShortRatioCsv { Timestamp = row.Time, LongShortRatio = row.Value }), "Timestamp", ct)
+        };
+
+    private static async Task AssertStorageLayoutAsync(string dbPath, string table, string expectedVersion, int expectedGroup)
+    {
+        await using DuckDBConnection connection = new(new DuckDBConnectionStringBuilder { DataSource = dbPath }.ConnectionString);
+        await connection.OpenAsync();
+        using DuckDBCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT tags['storage_version'] FROM duckdb_databases() WHERE database_name=current_database();";
+        Assert.AreEqual(expectedVersion, (string)(await command.ExecuteScalarAsync())!);
+        command.CommandText = $"SELECT MAX(rows) FROM (SELECT row_group_id,SUM(count)::BIGINT AS rows FROM pragma_storage_info('{table}') WHERE column_name='id' AND segment_type<>'VALIDITY' GROUP BY row_group_id);";
+        Assert.AreEqual((long)expectedGroup, Convert.ToInt64(await command.ExecuteScalarAsync()), dbPath);
+        command.CommandText = $"SELECT COUNT(*) FROM {table} WHERE id BETWEEN 0 AND 599999;";
+        Assert.AreEqual(600000L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+    }
+
     private string CreateDbPath()
         => Path.Combine(tempDirectory, "storage.duckdb");
 
     private string CreateMarketDataDbPath(string dataType)
-        => Path.Combine(tempDirectory, dataType, "storage.duckdb");
+        => Path.Combine(tempDirectory, dataType, "Spot", "storage.duckdb");
 
     private static Kline CreateKline(long openTime, long closeTime, double closePrice)
         => new()

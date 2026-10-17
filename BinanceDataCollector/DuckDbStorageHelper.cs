@@ -11,16 +11,10 @@ namespace BinanceDataCollector;
 
 internal static class DuckDbStorageHelper
 {
-    internal enum DatabaseInitializationProfile
-    {
-        Default,
-        LargeRowGroup
-    }
-
     private const int MarketDataImportBatchSize = 10_0000;
-    private const int LargeRowGroupSize = 524_288;
-    private const string BootstrapCatalogName = "bootstrap";
-    private const string LargeRowGroupStorageVersion = "v1.2.0";
+    private const int DefaultRowGroupSize = 122_880;
+    private const int AggTradesRowGroupSize = 524_288;
+    private const int BookDepthRowGroupSize = 262_144;
     private static readonly string BasePath = AppDomain.CurrentDomain.BaseDirectory;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General);
     private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
@@ -55,6 +49,8 @@ internal static class DuckDbStorageHelper
 
             List<T> recordList = [.. records];
             PropertyInfo[] properties = GetPersistedProperties(typeof(T));
+            DuckDbTimeKey? timeKey = keyColumn is null ? null : DuckDbTimeKey.ForColumn(normalizedPath, keyColumn);
+            ValidateTimeKeys(properties, recordList, timeKey);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             BatchTempTables tempTables = CreateGenericBatchTables(connection, properties);
             try
@@ -73,9 +69,9 @@ internal static class DuckDbStorageHelper
                     await dropCommand.ExecuteNonQueryAsync(CancellationToken.None);
                 }
 
-                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, CancellationToken.None);
+                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, CancellationToken.None, timeKey);
                 DeleteAllRows(connection, transaction, tableName);
-                InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
+                InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties, timeKey);
                 transaction.Commit();
                 MarkDatabaseDirty(normalizedPath);
             }
@@ -102,6 +98,8 @@ internal static class DuckDbStorageHelper
             PropertyInfo[] properties = GetPersistedProperties(typeof(T));
             PropertyInfo keyProperty = properties.FirstOrDefault(property => property.Name == keyColumn)
                 ?? throw new InvalidOperationException($"Key column '{keyColumn}' was not found on type '{typeof(T).FullName}'.");
+            DuckDbTimeKey? timeKey = DuckDbTimeKey.ForColumn(normalizedPath, keyColumn);
+            ValidateTimeKeys(properties, recordList, timeKey);
 
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             BatchTempTables tempTables = CreateGenericBatchTables(connection, properties);
@@ -112,9 +110,9 @@ internal static class DuckDbStorageHelper
                 AppendObjectRows(connection, tempTables.RowsTableName, properties, recordList, CancellationToken.None);
 
                 using DuckDBTransaction transaction = connection.BeginTransaction();
-                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, CancellationToken.None);
-                DeleteRowsByJoinKey(connection, transaction, tableName, tempTables.RowsTableName, keyProperty.Name);
-                InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties);
+                await EnsureTableAsync(connection, transaction, tableName, properties, keyColumn, CancellationToken.None, timeKey);
+                DeleteRowsByJoinKey(connection, transaction, tableName, tempTables.RowsTableName, keyProperty.Name, timeKey);
+                InsertFromStagingTable(connection, transaction, tableName, tempTables.RowsTableName, properties, timeKey);
                 transaction.Commit();
                 MarkDatabaseDirty(normalizedPath);
             }
@@ -229,15 +227,18 @@ internal static class DuckDbStorageHelper
             if (!await TableExistsAsync(connection, tableName, ct))
                 return null;
 
+            DuckDbTimeKey? timeKey = DuckDbTimeKey.ForColumn(normalizedPath, columnName);
+            EnsureTimeKeySchema(connection, tableName, timeKey);
             using DuckDBCommand command = connection.CreateCommand();
-            command.CommandText = BuildMaxDateTimeSql(tableName, columnName, filters);
+            command.CommandText = BuildMaxDateTimeSql(tableName, columnName, filters, timeKey);
             AddFilterParameters(command, filters);
 
             object? value = await command.ExecuteScalarAsync(ct);
             if (value is null || value is DBNull)
                 return null;
 
-            return Convert.ToInt64(value);
+            long maximum = Convert.ToInt64(value);
+            return timeKey is null ? maximum : timeKey.Decode(maximum);
         }, ct);
     }
 
@@ -282,11 +283,13 @@ internal static class DuckDbStorageHelper
             if (!await TableExistsAsync(connection, tableName, ct))
                 return;
 
+            DuckDbTimeKey? timeKey = DuckDbTimeKey.ForColumn(normalizedPath, columnName);
+            EnsureTimeKeySchema(connection, tableName, timeKey);
             using DuckDBCommand command = connection.CreateCommand();
-            command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(columnName)} < ?;";
+            command.CommandText = $"DELETE FROM {QuoteIdentifier(tableName)} WHERE {QuoteIdentifier(timeKey?.PhysicalColumn ?? columnName)} < ?;";
             IDbDataParameter parameter = command.CreateParameter();
             parameter.DbType = DbType.Int64;
-            parameter.Value = threshold;
+            parameter.Value = timeKey?.ExclusiveUpperBound(threshold) ?? threshold;
             command.Parameters.Add(parameter);
             await command.ExecuteNonQueryAsync(CancellationToken.None);
             MarkDatabaseDirty(normalizedPath);
@@ -338,13 +341,11 @@ internal static class DuckDbStorageHelper
         string csvPath,
         AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
-        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            EnsureDatabaseCreatedCore(normalizedPath, profile);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
             ImportAggTradesCsv(connection, tableName, csvPath, schema, sourceIsMicroseconds, replaceTail: true);
@@ -359,13 +360,11 @@ internal static class DuckDbStorageHelper
         string csvPath,
         AggTradesCsvSchema schema,
         bool sourceIsMicroseconds,
-        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            EnsureDatabaseCreatedCore(normalizedPath, profile);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureAggTradesTable(connection, tableName);
             ImportAggTradesCsv(connection, tableName, csvPath, schema, sourceIsMicroseconds, replaceTail: false);
@@ -378,13 +377,11 @@ internal static class DuckDbStorageHelper
         string dbPath,
         string tableName,
         string csvPath,
-        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, tableName, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
-            EnsureDatabaseCreatedCore(normalizedPath, profile);
             using DuckDBConnection connection = OpenConnection(normalizedPath);
             EnsureBookDepthTable(connection, tableName);
             ImportBookDepthCsv(connection, tableName, csvPath);
@@ -401,9 +398,9 @@ internal static class DuckDbStorageHelper
             ct.ThrowIfCancellationRequested();
             // Once checkpoint starts, do not let cancellation interrupt it midway.
             ExecuteDuckDbNonQuery(connection, "FORCE CHECKPOINT;");
+            ClearDirtyDatabase(normalizedPath);
             await Task.CompletedTask;
         }, ct);
-        ClearDirtyDatabase(normalizedPath);
     }
 
     public static async Task NormalizeAggTradesStoredTimeAsync(
@@ -437,18 +434,16 @@ internal static class DuckDbStorageHelper
 
     public static async Task EnsureDatabaseCreatedAsync(
         string dbPath,
-        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         await WithTableLockAsync(dbPath, string.Empty, async normalizedPath =>
         {
             ct.ThrowIfCancellationRequested();
 
-            string? directoryPath = Path.GetDirectoryName(normalizedPath);
-            if (!string.IsNullOrWhiteSpace(directoryPath))
-                Directory.CreateDirectory(directoryPath);
-
-            EnsureDatabaseCreatedCore(normalizedPath, profile);
+            if (!File.Exists(normalizedPath))
+            {
+                using DuckDBConnection connection = OpenConnection(normalizedPath);
+            }
             await Task.CompletedTask;
         }, ct);
     }
@@ -458,14 +453,17 @@ internal static class DuckDbStorageHelper
         string sourceTableName,
         string targetDbPath,
         string targetTableName,
-        DatabaseInitializationProfile profile = DatabaseInitializationProfile.Default,
         CancellationToken ct = default)
     {
         string normalizedSourcePath = Path.GetFullPath(sourceDbPath);
         if (!File.Exists(normalizedSourcePath))
             return;
 
-        await EnsureDatabaseCreatedAsync(targetDbPath, profile, ct);
+        if (DuckDbTimeKey.ForColumn(targetDbPath, "CloseTime") is not null
+            || DuckDbTimeKey.ForColumn(targetDbPath, "Timestamp") is not null)
+            throw new InvalidDataException("Legacy shared databases for encoded time-key series must be rebuilt before upgrading; copying their raw schema would produce an incompatible database.");
+
+        await EnsureDatabaseCreatedAsync(targetDbPath, ct);
 
         await WithTableLockAsync(targetDbPath, targetTableName, async normalizedTargetPath =>
         {
@@ -554,53 +552,25 @@ internal static class DuckDbStorageHelper
         if (!string.IsNullOrWhiteSpace(directoryPath))
             Directory.CreateDirectory(directoryPath);
 
-        DuckDBConnection connection = new($"Data Source={normalizedPath}");
-        connection.Open();
-        return connection;
-    }
-
-    private static void EnsureDatabaseCreatedCore(string normalizedPath, DatabaseInitializationProfile profile)
-    {
-        string? directoryPath = Path.GetDirectoryName(normalizedPath);
-        if (!string.IsNullOrWhiteSpace(directoryPath))
-            Directory.CreateDirectory(directoryPath);
-
-        if (File.Exists(normalizedPath))
-            return;
-
-        using DuckDBConnection connection = OpenConnectionForInitialization(normalizedPath, profile);
-    }
-
-    private static void MarkDatabaseDirty(string normalizedPath)
-        => DirtyDatabases[normalizedPath] = 0;
-
-    private static void ClearDirtyDatabase(string normalizedPath)
-        => DirtyDatabases.TryRemove(normalizedPath, out _);
-
-    private static DuckDBConnection OpenConnectionForInitialization(string normalizedPath, DatabaseInitializationProfile profile)
-    {
-        return profile switch
+        int rowGroupSize = GetRowGroupSize(normalizedPath);
+        DuckDBConnectionStringBuilder builder = new()
         {
-            DatabaseInitializationProfile.Default => OpenConnection(normalizedPath),
-            DatabaseInitializationProfile.LargeRowGroup => OpenConnectionWithLargeRowGroupBootstrap(normalizedPath),
-            _ => throw new ArgumentOutOfRangeException(nameof(profile), profile, "Unsupported database initialization profile.")
+            DataSource = rowGroupSize == DefaultRowGroupSize ? normalizedPath : ":memory:",
+            StorageCompatibilityVersion = "latest"
         };
-    }
-
-    private static DuckDBConnection OpenConnectionWithLargeRowGroupBootstrap(string normalizedPath)
-    {
-        DuckDBConnection connection = new("Data Source=:memory:");
+        DuckDBConnection connection = new(builder.ConnectionString);
         try
         {
             connection.Open();
-            string escapedPath = normalizedPath.Replace("'", "''", StringComparison.Ordinal);
-            ExecuteDuckDbNonQuery(connection, $"""
-                ATTACH '{escapedPath}' AS {QuoteIdentifier(BootstrapCatalogName)} (ROW_GROUP_SIZE {LargeRowGroupSize}, STORAGE_VERSION '{LargeRowGroupStorageVersion}');
-                USE {QuoteIdentifier(BootstrapCatalogName)};
-                CREATE TABLE IF NOT EXISTS __bootstrap__row_group__init(id INTEGER);
-                DROP TABLE __bootstrap__row_group__init;
-                CHECKPOINT;
-                """);
+            if (rowGroupSize != DefaultRowGroupSize)
+            {
+                // ROW_GROUP_SIZE is attachment-scoped: apply it to every writer/checkpoint open.
+                string escapedPath = normalizedPath.Replace("'", "''", StringComparison.Ordinal);
+                ExecuteDuckDbNonQuery(connection, $"""
+                    ATTACH '{escapedPath}' AS storage (ROW_GROUP_SIZE {rowGroupSize}, STORAGE_VERSION 'latest');
+                    USE storage;
+                    """);
+            }
             return connection;
         }
         catch
@@ -609,6 +579,28 @@ internal static class DuckDbStorageHelper
             throw;
         }
     }
+
+    private static int GetRowGroupSize(string normalizedPath)
+    {
+        string? marketFolder = Path.GetDirectoryName(normalizedPath);
+        string? seriesFolder = marketFolder is null ? null : Path.GetDirectoryName(marketFolder);
+        string? series = Path.GetFileName(seriesFolder);
+        if (PathComparer.Equals(series, "aggTrades"))
+            return AggTradesRowGroupSize;
+        if (PathComparer.Equals(series, "bookDepth"))
+            return BookDepthRowGroupSize;
+        return DefaultRowGroupSize;
+    }
+
+    private static DbTableLockKey GetTableLockKey(string normalizedPath, string tableName)
+        // Separate in-memory instances cannot attach the same file at the same time.
+        => new(normalizedPath, GetRowGroupSize(normalizedPath) == DefaultRowGroupSize ? tableName : string.Empty);
+
+    private static void MarkDatabaseDirty(string normalizedPath)
+        => DirtyDatabases[normalizedPath] = 0;
+
+    private static void ClearDirtyDatabase(string normalizedPath)
+        => DirtyDatabases.TryRemove(normalizedPath, out _);
 
     private static void BeginExclusiveMode()
     {
@@ -635,7 +627,7 @@ internal static class DuckDbStorageHelper
         await EnterOperationAsync(ct);
         try
         {
-            SemaphoreSlim gate = TableLocks.GetOrAdd(new DbTableLockKey(normalizedPath, tableName), static _ => new SemaphoreSlim(1, 1));
+            SemaphoreSlim gate = TableLocks.GetOrAdd(GetTableLockKey(normalizedPath, tableName), static _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(ct);
             try
             {
@@ -658,7 +650,7 @@ internal static class DuckDbStorageHelper
         await EnterOperationAsync(ct);
         try
         {
-            SemaphoreSlim gate = TableLocks.GetOrAdd(new DbTableLockKey(normalizedPath, tableName), static _ => new SemaphoreSlim(1, 1));
+            SemaphoreSlim gate = TableLocks.GetOrAdd(GetTableLockKey(normalizedPath, tableName), static _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(ct);
             try
             {
@@ -678,6 +670,15 @@ internal static class DuckDbStorageHelper
     private static async Task WithConnectionAsync(string dbPath, Func<DuckDBConnection, Task> action, CancellationToken ct = default)
     {
         string normalizedPath = Path.GetFullPath(dbPath);
+        if (GetRowGroupSize(normalizedPath) != DefaultRowGroupSize)
+        {
+            await WithTableLockAsync(normalizedPath, string.Empty, async path =>
+            {
+                using DuckDBConnection connection = OpenConnection(path);
+                await action(connection);
+            }, ct);
+            return;
+        }
         await EnterOperationAsync(ct);
         try
         {
@@ -693,6 +694,14 @@ internal static class DuckDbStorageHelper
     private static async Task<T> WithConnectionAsync<T>(string dbPath, Func<DuckDBConnection, Task<T>> action, CancellationToken ct = default)
     {
         string normalizedPath = Path.GetFullPath(dbPath);
+        if (GetRowGroupSize(normalizedPath) != DefaultRowGroupSize)
+        {
+            return await WithTableLockAsync(normalizedPath, string.Empty, async path =>
+            {
+                using DuckDBConnection connection = OpenConnection(path);
+                return await action(connection);
+            }, ct);
+        }
         await EnterOperationAsync(ct);
         try
         {
@@ -741,13 +750,15 @@ internal static class DuckDbStorageHelper
         string tableName,
         IReadOnlyList<PropertyInfo> properties,
         string? keyColumn,
-        CancellationToken ct)
+        CancellationToken ct,
+        DuckDbTimeKey? timeKey = null)
     {
         ct.ThrowIfCancellationRequested();
         using DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = BuildCreateTableSql(tableName, properties, keyColumn);
+        command.CommandText = BuildCreateTableSql(tableName, properties, keyColumn, timeKey);
         await command.ExecuteNonQueryAsync(CancellationToken.None);
+        EnsureTimeKeySchema(connection, tableName, timeKey, transaction);
     }
 
     private static void DeleteAllRows(DuckDBConnection connection, DuckDBTransaction transaction, string tableName)
@@ -758,14 +769,15 @@ internal static class DuckDbStorageHelper
         command.ExecuteNonQuery();
     }
 
-    private static void DeleteRowsByJoinKey(DuckDBConnection connection, DuckDBTransaction transaction, string tableName, string stagingTableName, string keyColumn)
+    private static void DeleteRowsByJoinKey(DuckDBConnection connection, DuckDBTransaction transaction, string tableName, string stagingTableName, string keyColumn, DuckDbTimeKey? timeKey = null)
     {
+        string stagingKey = $"{QuoteIdentifier(stagingTableName)}.{QuoteIdentifier(keyColumn)}";
         using DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"""
             DELETE FROM {QuoteIdentifier(tableName)}
             USING {QuoteIdentifier(stagingTableName)}
-            WHERE {QuoteIdentifier(tableName)}.{QuoteIdentifier(keyColumn)} = {QuoteIdentifier(stagingTableName)}.{QuoteIdentifier(keyColumn)};
+            WHERE {QuoteIdentifier(tableName)}.{QuoteIdentifier(timeKey?.PhysicalColumn ?? keyColumn)} = {timeKey?.EncodeSql(stagingKey) ?? stagingKey};
             """;
         command.ExecuteNonQuery();
     }
@@ -775,13 +787,17 @@ internal static class DuckDbStorageHelper
         DuckDBTransaction transaction,
         string tableName,
         string stagingTableName,
-        IReadOnlyList<PropertyInfo> properties)
+        IReadOnlyList<PropertyInfo> properties,
+        DuckDbTimeKey? timeKey = null)
     {
+        string projection = string.Join(", ", properties.Select(property => property.Name == timeKey?.LogicalColumn
+            ? timeKey.EncodeSql(QuoteIdentifier(property.Name))
+            : QuoteIdentifier(property.Name)));
         using DuckDBCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"""
-            INSERT INTO {QuoteIdentifier(tableName)} ({BuildColumnListSql(properties)})
-            SELECT {BuildColumnListSql(properties)}
+            INSERT INTO {QuoteIdentifier(tableName)} ({BuildColumnListSql(properties, timeKey)})
+            SELECT {projection}
             FROM {QuoteIdentifier(stagingTableName)};
             """;
         command.ExecuteNonQuery();
@@ -1309,21 +1325,60 @@ internal static class DuckDbStorageHelper
             .Where(property => property.CanRead && property.CanWrite && IsSupportedPropertyType(property.PropertyType))
             .ToArray();
 
-    private static string BuildCreateTableSql(string tableName, IReadOnlyList<PropertyInfo> properties, string? keyColumn)
+    private static string BuildCreateTableSql(string tableName, IReadOnlyList<PropertyInfo> properties, string? keyColumn, DuckDbTimeKey? timeKey = null)
     {
-        List<string> columns = [BuildColumnDefinitionsSql(properties)];
+        List<string> columns = [BuildColumnDefinitionsSql(properties, timeKey)];
 
         if (!string.IsNullOrWhiteSpace(keyColumn))
-            columns.Add($"PRIMARY KEY ({QuoteIdentifier(keyColumn)})");
+            columns.Add($"PRIMARY KEY ({QuoteIdentifier(timeKey?.PhysicalColumn ?? keyColumn)})");
 
         return $"CREATE TABLE IF NOT EXISTS {QuoteIdentifier(tableName)} ({string.Join(", ", columns)});";
     }
 
-    private static string BuildColumnDefinitionsSql(IReadOnlyList<PropertyInfo> properties)
-        => string.Join(", ", properties.Select(property => $"{QuoteIdentifier(property.Name)} {MapDuckDbType(property.PropertyType)}"));
+    private static string BuildColumnDefinitionsSql(IReadOnlyList<PropertyInfo> properties, DuckDbTimeKey? timeKey = null)
+        => string.Join(", ", properties.Select(property => $"{QuoteIdentifier(property.Name == timeKey?.LogicalColumn ? timeKey.PhysicalColumn : property.Name)} {MapDuckDbType(property.PropertyType)}"));
 
-    private static string BuildColumnListSql(IReadOnlyList<PropertyInfo> properties)
-        => string.Join(", ", properties.Select(property => QuoteIdentifier(property.Name)));
+    private static string BuildColumnListSql(IReadOnlyList<PropertyInfo> properties, DuckDbTimeKey? timeKey = null)
+        => string.Join(", ", properties.Select(property => QuoteIdentifier(property.Name == timeKey?.LogicalColumn ? timeKey.PhysicalColumn : property.Name)));
+
+    private static void ValidateTimeKeys<T>(IReadOnlyList<PropertyInfo> properties, IReadOnlyList<T> records, DuckDbTimeKey? timeKey)
+    {
+        if (timeKey is null)
+            return;
+
+        PropertyInfo property = properties.Single(property => property.Name == timeKey.LogicalColumn);
+        if (property.PropertyType != typeof(long))
+            throw new InvalidDataException($"{timeKey.LogicalColumn} must be a non-null Int64 time key.");
+
+        foreach (T record in records)
+            timeKey.Encode((long)property.GetValue(record)!);
+    }
+
+    private static void EnsureTimeKeySchema(DuckDBConnection connection, string tableName, DuckDbTimeKey? timeKey, DuckDBTransaction? transaction = null)
+    {
+        if (timeKey is null)
+            return;
+
+        using DuckDBCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_catalog = current_database() AND table_schema = current_schema()
+              AND table_name = ? AND column_name = ? AND data_type = 'BIGINT'
+              AND EXISTS (
+                  SELECT 1 FROM duckdb_constraints()
+                  WHERE database_name = current_database() AND schema_name = current_schema()
+                    AND table_name = ? AND constraint_type = 'PRIMARY KEY'
+                    AND constraint_column_names = [?]
+              );
+            """;
+        command.Parameters.Add(new DuckDBParameter { Value = tableName });
+        command.Parameters.Add(new DuckDBParameter { Value = timeKey.PhysicalColumn });
+        command.Parameters.Add(new DuckDBParameter { Value = tableName });
+        command.Parameters.Add(new DuckDBParameter { Value = timeKey.PhysicalColumn });
+        if (Convert.ToInt32(command.ExecuteScalar()) != 1)
+            throw new InvalidDataException($"Table '{tableName}' requires encoded BIGINT PRIMARY KEY '{timeKey.PhysicalColumn}'. Rebuild the old DuckDB data before running this version; no automatic conversion is performed.");
+    }
 
     private static void CreateTemporaryTable(DuckDBConnection connection, string tableName, string columnDefinitions)
         => ExecuteDuckDbNonQuery(connection, $"""
@@ -1332,16 +1387,20 @@ internal static class DuckDbStorageHelper
             );
             """);
 
-    private static string BuildMaxDateTimeSql(string tableName, string columnName, IReadOnlyDictionary<string, object?>? filters)
+    private static string BuildMaxDateTimeSql(string tableName, string columnName, IReadOnlyDictionary<string, object?>? filters, DuckDbTimeKey? timeKey = null)
     {
-        string sql = $"SELECT MAX({QuoteIdentifier(columnName)}) FROM {QuoteIdentifier(tableName)}";
+        string sql = $"SELECT MAX({QuoteIdentifier(timeKey?.PhysicalColumn ?? columnName)}) FROM {QuoteIdentifier(tableName)}";
         if (filters is null || filters.Count == 0)
             return sql + ";";
 
         string[] predicates = filters
-            .Select(filter => filter.Value is null
-                ? $"{QuoteIdentifier(filter.Key)} IS NULL"
-                : $"{QuoteIdentifier(filter.Key)} = ?")
+            .Select(filter =>
+            {
+                string column = filter.Key == timeKey?.LogicalColumn
+                    ? timeKey.DecodeSql(QuoteIdentifier(timeKey.PhysicalColumn))
+                    : QuoteIdentifier(filter.Key);
+                return filter.Value is null ? $"{column} IS NULL" : $"{column} = ?";
+            })
             .ToArray();
         return $"{sql} WHERE {string.Join(" AND ", predicates)};";
     }

@@ -430,6 +430,9 @@ internal abstract class StorageController<T>
             catch (Exception ex)
             {
                 logger.LogError("Symbol: {Symbol}, Message: {Message}", batch.SymbolName, ex.Message);
+                // A rejected encoding/schema must not be reported as a successful batch.
+                if (ex is InvalidDataException)
+                    throw;
             }
         }
         finally
@@ -514,7 +517,6 @@ internal abstract class StorageController<T>
                             csvPath,
                             GetAggTradesCsvSchema(),
                             GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
-                            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup,
                             ct);
                         symbolDbModified = true;
 
@@ -600,7 +602,6 @@ internal abstract class StorageController<T>
                             databasePath,
                             SymbolDataTableName,
                             csvPath,
-                            DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup,
                             ct);
                         symbolDbModified = true;
 
@@ -868,7 +869,6 @@ internal abstract class StorageController<T>
                     csvPath,
                     GetAggTradesCsvSchema(),
                     GetAggTradesTimeUnitForTimestamp(GetMarketDataCsvSortKey(csvPath)) == AggTradesTimeUnit.Microseconds,
-                    DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup,
                     ct);
             }
 
@@ -1059,35 +1059,34 @@ internal abstract class StorageController<T>
 
     private async Task MigrateLegacySharedDatabasesAsync(CancellationToken ct)
     {
-        foreach ((string folderPath, DuckDbStorageHelper.DatabaseInitializationProfile profile) in GetLegacySharedDatabaseFolders())
-            await MigrateLegacySharedDatabaseAsync(folderPath, profile, ct);
+        foreach (string folderPath in GetLegacySharedDatabaseFolders())
+            await MigrateLegacySharedDatabaseAsync(folderPath, ct);
     }
 
-    private IEnumerable<(string FolderPath, DuckDbStorageHelper.DatabaseInitializationProfile Profile)> GetLegacySharedDatabaseFolders()
+    private IEnumerable<string> GetLegacySharedDatabaseFolders()
     {
-        yield return (KlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
+        yield return KlinePath;
 
         if (IsFutures)
         {
-            yield return (PremiumIndexKlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (IndexPriceKlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (MarkPriceKlinePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (FundingRatePath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (OpenInterestPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (TopLongShortPositionRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (TopLongShortAccountRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (GlobalLongShortAccountRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (TakerLongShortRatioPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (BasisPath, DuckDbStorageHelper.DatabaseInitializationProfile.Default);
-            yield return (GetBookDepthStorageFolderPath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+            yield return PremiumIndexKlinePath;
+            yield return IndexPriceKlinePath;
+            yield return MarkPriceKlinePath;
+            yield return FundingRatePath;
+            yield return OpenInterestPath;
+            yield return TopLongShortPositionRatioPath;
+            yield return TopLongShortAccountRatioPath;
+            yield return GlobalLongShortAccountRatioPath;
+            yield return TakerLongShortRatioPath;
+            yield return BasisPath;
+            yield return GetBookDepthStorageFolderPath();
         }
 
-        yield return (GetAggTradesStorageFolderPath(), DuckDbStorageHelper.DatabaseInitializationProfile.LargeRowGroup);
+        yield return GetAggTradesStorageFolderPath();
     }
 
     private async Task MigrateLegacySharedDatabaseAsync(
         string marketFolderPath,
-        DuckDbStorageHelper.DatabaseInitializationProfile profile,
         CancellationToken ct)
     {
         string legacyDatabasePath = GetLegacyMarketDatabasePath(marketFolderPath);
@@ -1116,7 +1115,6 @@ internal abstract class StorageController<T>
                 symbolName,
                 targetDatabasePath,
                 SymbolDataTableName,
-                profile,
                 ct);
         }
 
